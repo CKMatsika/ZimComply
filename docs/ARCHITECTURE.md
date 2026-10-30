@@ -118,38 +118,48 @@ app/
 
 ---
 
-## 5. Deterministic Statutory Rule Engine
+## 5. Deterministic Statutory Rule Engine (Milestone 2.2 Implemented)
 
-### 5.1 Structure
-The Rule Engine is entirely decoupled from user-interface and generative AI code.
+### 5.1 Service Structure
+The Registration Engine is strictly deterministic, decoupled from UI controllers and completely independent of generative AI.
 ```
-Shared/RuleEngine/
-├── Contracts/
-│   ├── ObligationEvaluatorInterface.php
-│   └── CalculationRuleInterface.php
-├── Registry/
-│   └── RulePackRegistry.php
-├── Evaluators/
-│   ├── RegistrationApplicabilityEvaluator.php
-│   ├── PayeCalculationEvaluator.php
-│   ├── NssaContributionEvaluator.php
-│   └── ZinaraVehicleLicenceEvaluator.php
-└── ValueObjects/
-    ├── EvaluationContext.php
-    └── EvaluationResult.php
+app/Domains/RegistrationEngine/
+├── Services/
+│   ├── RuleConditionEvaluator.php      # Restricted, validated condition evaluation engine (equals, not_equals, gt, gte, lt, lte, in, contains, all, any)
+│   ├── DependencyGraph.php             # Directed Acyclic Graph (DAG) with Kahn's topological sort and cycle detection
+│   ├── ApplicabilityEvaluator.php      # Resolves active, approved, verified rule versions and evaluates statutory outcomes
+│   └── RegistrationRoadmapGenerator.php # Orchestrates evaluation, DAG sort, tenant isolation, and idempotent persistence
+├── Exceptions/
+│   ├── CircularDependencyException.php # Identifies exact cycle path (e.g. A -> B -> C -> A)
+│   ├── MissingPrerequisiteException.php# Identifies missing prerequisite code in catalog
+│   ├── InvalidConditionException.php   # Rejects malformed condition nodes and unknown operators
+│   └── UnresolvedInputException.php    # Surfaces contradictory profile inputs requiring resolution
+├── DTOs/
+│   └── ApplicabilityDecision.php       # Auditable statutory decision value object
+└── Models/
+    ├── RegulatoryAuthority.php
+    ├── RegulatorySource.php
+    ├── RulePack.php
+    ├── RuleVersion.php
+    ├── ObligationDefinition.php
+    ├── RegistrationQuestionnaire.php
+    ├── ApplicabilityAssessment.php
+    ├── AssessmentResult.php
+    └── ObligationInstance.php
 ```
 
-### 5.2 Rule Packs & Versioning
+### 5.2 Rule Packs, Versioning & Effective Dates
 - Statutory rules are maintained in database tables (`rule_packs`, `rule_versions`, `obligation_definitions`).
 - Each rule version specifies:
   - `effective_from` (Date)
   - `effective_to` (Date or NULL for active rules)
-  - `currency` (USD or ZiG)
-  - `statutory_citation` (Statutory Instrument number, Act section, Gazetted notice)
+  - `verification_status` (`VERIFIED_OFFICIAL`, `REQUIRES_REVIEW`, `DRAFT`)
+  - `status` (`DRAFT`, `PENDING_REVIEW`, `APPROVED`, `ACTIVE`, `SUPERSEDED`, `REJECTED`)
   - `parameters` (JSON schema containing thresholds, percentage rates, exemption flags)
-  - `approved_by` (User ID of accredited regulatory legal editor)
-  - `status` (`DRAFT`, `PENDING_REVIEW`, `ACTIVE`, `SUPERSEDED`, `ARCHIVED`)
-- **Historical Immutability:** When calculating historical payroll or assessing a past period, the engine strictly queries the rule pack whose effective date range matches the filing period date. Amending an active rule never retroactively mutates past finalised filings.
+  - Dual-key governance (`proposed_by_user_id`, `approved_by_user_id`, `approved_at`)
+- **Verification Guarantee:** Only approved, verified, and effective-dated rules generate definitive statutory obligations (`MANDATORY`, `CONDITIONAL`, `EXEMPT`). Unverified, draft, or out-of-date rules are placed on `UNVERIFIED_HOLD`.
+- **Topological Sequence Guarantee:** Prerequisites are ordered via Kahn's algorithm with deterministic tie-breaking (classification priority, then alphabetical by code).
+- **Historical Immutability & Idempotency:** Assessments are saved as immutable records with SHA-256 fingerprinting or explicit idempotency keys; re-evaluating or changing business circumstances creates a new historical record without mutating past assessments.
 
 ---
 
