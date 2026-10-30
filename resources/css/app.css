@@ -9,35 +9,82 @@
 @source '../**/*.tsx';
 
 @theme {
-    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-    --font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-heading: 'Plus Jakarta Sans', 'Inter', sans-serif;
+
+    --color-navy-950: #0b1420;
+    --color-navy-900: #14263D;
+    --color-navy-800: #1c3350;
+    --color-navy-700: #25446a;
+    --color-navy-600: #325888;
+
+    --color-teal-900: #0d3d3a;
+    --color-teal-800: #125752;
+    --color-teal-700: #19766F;
+    --color-teal-600: #20948b;
+    --color-teal-500: #2cb3a8;
+    --color-teal-100: #e2f4f2;
+    --color-teal-50: #f0faf9;
+
+    --color-amber-600: #b5812d;
+    --color-amber-500: #D8A34B;
+    --color-amber-100: #fbf1de;
+    --color-amber-50: #fdf8ee;
+
+    --color-risk-700: #933632;
+    --color-risk-600: #B84B46;
+    --color-risk-500: #c95d58;
+    --color-risk-100: #f9e6e5;
+    --color-risk-50: #fdf2f2;
+
+    --color-canvas: #F7F8FA;
+    --color-surface: #FFFFFF;
+    --color-subtle: #F1F4F8;
+    --color-border-subtle: #E2E8F0;
+    --color-border-strong: #CBD5E1;
 }
 
-/* Custom scrollbars */
+/* Base Body Styling */
+body {
+    background-color: #F7F8FA;
+    color: #1E293B;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Professional Enterprise Scrollbar */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
 }
 ::-webkit-scrollbar-track {
-    background: #090d16;
+    background: #F1F4F8;
 }
 ::-webkit-scrollbar-thumb {
-    background: #1e293b;
-    border-radius: 9999px;
+    background: #CBD5E1;
+    border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+    background: #94A3B8;
 }
 
-/* Glassmorphism helpers */
-.glass-panel {
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+/* Subtle Enterprise Surface Styles */
+.enterprise-card {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.02);
 }
 
-.glass-card {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+.enterprise-card-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #F1F5F9;
+    background-color: #FFFFFF;
+    border-top-left-radius: 0.75rem;
+    border-top-right-radius: 0.75rem;
+}
+
+.enterprise-card-body {
+    padding: 1.25rem;
 }

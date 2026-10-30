@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, usePage, router } from '@inertiajs/react';
 import { PageProps } from '@/types';
 import {
+    LayoutDashboard,
     Compass,
     ShieldCheck,
     RefreshCw,
@@ -19,7 +20,15 @@ import {
     AlertTriangle,
     Info,
     Sparkles,
+    Search,
+    ChevronRight,
+    Shield,
+    ExternalLink,
+    HelpCircle,
+    UserCircle,
 } from 'lucide-react';
+import { Badge } from '@/Components/UI/Badge';
+import { AiDrawer } from '@/Components/UI/AiDrawer';
 
 interface AppLayoutProps {
     children: React.ReactNode;
@@ -32,14 +41,17 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
     const [orgMenuOpen, setOrgMenuOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const currentRoute = window.location.pathname;
 
     const navItems = [
-        { name: 'Register', href: '/registration', icon: Compass, active: currentRoute.startsWith('/registration') },
-        { name: 'Comply', href: '/comply', icon: ShieldCheck, active: currentRoute.startsWith('/comply') },
-        { name: 'Renew', href: '/renew', icon: RefreshCw, active: currentRoute.startsWith('/renew') },
-        { name: 'Tender', href: '/tender', icon: Award, active: currentRoute.startsWith('/tender') },
+        { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, active: currentRoute === '/dashboard' },
+        { name: 'Registration', href: '/registration', icon: Compass, active: currentRoute.startsWith('/registration') },
+        { name: 'Compliance', href: '/comply', icon: ShieldCheck, active: currentRoute.startsWith('/comply') },
+        { name: 'Renewals', href: '/renew', icon: RefreshCw, active: currentRoute.startsWith('/renew') },
+        { name: 'Procurement / Tender', href: '/tender', icon: Award, active: currentRoute.startsWith('/tender') },
         { name: 'Documents', href: '/documents', icon: FolderLock, active: currentRoute.startsWith('/documents') },
         { name: 'Reports', href: '/reports', icon: BarChart3, active: currentRoute.startsWith('/reports') },
         { name: 'Settings', href: '/settings', icon: Settings, active: currentRoute.startsWith('/settings') },
@@ -51,247 +63,349 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
         });
     };
 
+    // Determine current breadcrumb section name
+    const currentNavItem = navItems.find((item) => item.active) || navItems[0];
+
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-            {/* Top Navigation Bar */}
-            <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between h-16">
-                        {/* Logo & Main Nav */}
-                        <div className="flex items-center gap-8">
-                            <Link href="/dashboard" className="flex items-center gap-3 group">
-                                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-500 via-teal-600 to-amber-500 p-0.5 shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-                                    <div className="h-full w-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-                                        <ShieldCheck className="h-5 w-5 text-emerald-400 group-hover:text-emerald-300" />
+        <div className="min-h-screen bg-[#F7F8FA] text-slate-800 flex font-sans antialiased">
+            {/* Left Enterprise Navigation Sidebar */}
+            <aside
+                className="hidden lg:flex lg:flex-col lg:w-64 bg-[#14263D] border-r border-[#1C3554] text-slate-300 fixed inset-y-0 z-30"
+                aria-label="Main Navigation"
+            >
+                {/* Brand Header */}
+                <div className="h-16 flex items-center px-6 border-b border-[#1C3554] bg-[#0E1B2C]">
+                    <Link href="/dashboard" className="flex items-center gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 rounded-lg">
+                        <div className="h-9 w-9 rounded-lg bg-[#19766F] text-white flex items-center justify-center font-bold shadow-xs">
+                            <Shield className="h-5 w-5 text-teal-100" />
+                        </div>
+                        <div className="flex flex-col">
+                            <div className="font-heading font-extrabold text-base tracking-tight text-white flex items-center gap-1">
+                                <span>ZimComply</span>
+                                <span className="text-[#2cb3a8] text-xs font-semibold px-1 py-0.2 bg-teal-950/70 border border-teal-700/60 rounded">AI</span>
+                            </div>
+                            <span className="text-[10px] font-medium text-slate-400 tracking-wider uppercase -mt-0.5">
+                                Regulatory SaaS
+                            </span>
+                        </div>
+                    </Link>
+                </div>
+
+                {/* Organisation Switcher (Multi-company enterprise) */}
+                <div className="p-3 border-b border-[#1C3554]">
+                    <div className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setOrgMenuOpen(!orgMenuOpen)}
+                            className="w-full flex items-center justify-between p-2 rounded-lg bg-[#1C3554]/70 hover:bg-[#1C3554] border border-[#25466D] text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+                            aria-expanded={orgMenuOpen}
+                            aria-label="Switch organisation"
+                        >
+                            <div className="flex items-center gap-2.5 truncate">
+                                <Building2 className="h-4 w-4 text-[#2cb3a8] shrink-0" />
+                                <div className="truncate">
+                                    <div className="text-xs font-semibold text-white truncate">
+                                        {auth.active_organisation?.legal_name || 'Select Entity'}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 truncate">
+                                        {auth.active_organisation?.entity_type ? auth.active_organisation.entity_type.replace(/_/g, ' ') : 'Corporate Entity'}
                                     </div>
                                 </div>
-                                <div className="flex flex-col">
-                                    <span className="font-heading font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                                        ZimComply<span className="text-emerald-400">AI</span>
-                                    </span>
-                                    <span className="text-[10px] font-semibold tracking-wider uppercase text-emerald-400/90 -mt-1">
-                                        Zimbabwe Enterprise
-                                    </span>
-                                </div>
-                            </Link>
+                            </div>
+                            <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        </button>
 
-                            {/* Desktop Nav Items */}
-                            <nav className="hidden lg:flex items-center gap-1">
-                                <Link
-                                    href="/dashboard"
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                                        currentRoute === '/dashboard'
-                                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                            : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                                    }`}
-                                >
-                                    Overview
-                                </Link>
-                                {navItems.map((item) => {
-                                    const Icon = item.icon;
-                                    return (
-                                        <Link
-                                            key={item.name}
-                                            href={item.href}
-                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                                                item.active
-                                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                                    : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                        {orgMenuOpen && (
+                            <div className="absolute left-0 right-0 mt-1.5 bg-[#14263D] border border-[#25466D] rounded-xl shadow-2xl py-1 z-50">
+                                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-[#1C3554]">
+                                    Associated Entities
+                                </div>
+                                <div className="max-h-56 overflow-y-auto">
+                                    {auth.available_organisations.map((org) => (
+                                        <button
+                                            key={org.id}
+                                            type="button"
+                                            onClick={() => handleSwitchOrg(org.id)}
+                                            className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-[#1C3554] transition-colors ${
+                                                auth.active_organisation?.id === org.id
+                                                    ? 'text-[#2cb3a8] font-bold bg-[#1C3554]/40'
+                                                    : 'text-slate-200'
                                             }`}
                                         >
-                                            <Icon className="h-4 w-4" />
-                                            {item.name}
-                                        </Link>
-                                    );
-                                })}
-                            </nav>
-                        </div>
-
-                        {/* Right Area: Org Switcher, User Menu */}
-                        <div className="flex items-center gap-3">
-                            {/* Company Switcher Dropdown */}
-                            <div className="relative">
-                                <button
-                                    onClick={() => setOrgMenuOpen(!orgMenuOpen)}
-                                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 text-xs font-medium text-slate-200 transition-colors"
-                                >
-                                    <Building2 className="h-3.5 w-3.5 text-emerald-400" />
-                                    <span className="max-w-[120px] sm:max-w-[180px] truncate">
-                                        {auth.active_organisation?.legal_name || 'Select Company'}
-                                    </span>
-                                    <ChevronDown className="h-3 w-3 text-slate-400" />
-                                </button>
-
-                                {orgMenuOpen && (
-                                    <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-800 rounded-xl shadow-xl py-2 z-50">
-                                        <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                                            Active Organisation
-                                        </div>
-                                        {auth.available_organisations.map((org) => (
-                                            <button
-                                                key={org.id}
-                                                onClick={() => handleSwitchOrg(org.id)}
-                                                className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-slate-800/60 transition-colors ${
-                                                    auth.active_organisation?.id === org.id
-                                                        ? 'text-emerald-400 font-medium bg-emerald-500/5'
-                                                        : 'text-slate-300'
-                                                }`}
-                                            >
-                                                <div className="truncate">
-                                                    <div className="truncate">{org.legal_name}</div>
-                                                    <div className="text-[10px] text-slate-500">{org.entity_type} • {org.base_currency}</div>
-                                                </div>
-                                                {auth.active_organisation?.id === org.id && (
-                                                    <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-                                                )}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* User Profile Dropdown */}
-                            <div className="relative">
-                                <button
-                                    onClick={() => setUserMenuOpen(!userMenuOpen)}
-                                    className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-                                >
-                                    <div className="h-8 w-8 rounded-lg bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 flex items-center justify-center font-bold text-xs">
-                                        {auth.user?.name ? auth.user.name.charAt(0).toUpperCase() : 'U'}
-                                    </div>
-                                    <ChevronDown className="h-3 w-3 text-slate-400 hidden sm:block" />
-                                </button>
-
-                                {userMenuOpen && (
-                                    <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-xl py-2 z-50">
-                                        <div className="px-4 py-2 border-b border-slate-800">
-                                            <div className="text-sm font-semibold text-white">{auth.user?.name}</div>
-                                            <div className="text-xs text-slate-400 truncate">{auth.user?.email}</div>
-                                            <div className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300">
-                                                Role: {auth.role || 'Member'}
+                                            <div className="truncate">
+                                                <div className="truncate">{org.legal_name}</div>
+                                                <div className="text-[10px] text-slate-400">{org.entity_type} • {org.base_currency}</div>
                                             </div>
-                                        </div>
-
-                                        <Link
-                                            href="/settings"
-                                            onClick={() => setUserMenuOpen(false)}
-                                            className="flex items-center gap-2 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800/60 hover:text-white"
-                                        >
-                                            <Settings className="h-4 w-4 text-slate-400" />
-                                            Settings
-                                        </Link>
-
-                                        <Link
-                                            href="/logout"
-                                            method="post"
-                                            as="button"
-                                            className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 border-t border-slate-800"
-                                        >
-                                            <LogOut className="h-4 w-4" />
-                                            Sign out
-                                        </Link>
-                                    </div>
-                                )}
+                                            {auth.active_organisation?.id === org.id && (
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-[#2cb3a8] shrink-0" />
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-
-                            {/* Mobile Hamburger Button */}
-                            <button
-                                onClick={() => setMobileNavOpen(!mobileNavOpen)}
-                                className="lg:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-                            >
-                                {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-                            </button>
-                        </div>
+                        )}
                     </div>
                 </div>
 
-                {/* Mobile Navigation Drawer */}
-                {mobileNavOpen && (
-                    <div className="lg:hidden border-b border-slate-800 bg-slate-900 px-4 pt-2 pb-4 space-y-1">
-                        <Link
-                            href="/dashboard"
-                            onClick={() => setMobileNavOpen(false)}
-                            className="block px-3 py-2 rounded-lg text-sm font-medium text-slate-200 hover:bg-slate-800"
-                        >
-                            Overview
-                        </Link>
-                        {navItems.map((item) => (
+                {/* Navigation Items List */}
+                <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                    <div className="px-3 pb-2 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                        Core Workspaces
+                    </div>
+                    {navItems.map((item) => {
+                        const Icon = item.icon;
+                        return (
                             <Link
                                 key={item.name}
                                 href={item.href}
-                                onClick={() => setMobileNavOpen(false)}
-                                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-200 hover:bg-slate-800"
+                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 ${
+                                    item.active
+                                        ? 'bg-[#19766F] text-white font-semibold shadow-xs'
+                                        : 'text-slate-300 hover:text-white hover:bg-[#1C3554]'
+                                }`}
                             >
-                                <item.icon className="h-4 w-4 text-emerald-400" />
-                                {item.name}
+                                <Icon className={`h-4 w-4 shrink-0 ${item.active ? 'text-white' : 'text-slate-400'}`} />
+                                <span className="truncate">{item.name}</span>
                             </Link>
-                        ))}
-                    </div>
-                )}
-            </header>
+                        );
+                    })}
+                </nav>
 
-            {/* Flash Notification Alerts */}
-            {flash?.success && (
-                <div className="bg-emerald-950/80 border-b border-emerald-800/50 text-emerald-200 px-4 py-2.5 text-sm flex items-center gap-2.5 shadow-sm">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                    <span>{flash.success}</span>
-                </div>
-            )}
-            {flash?.error && (
-                <div className="bg-red-950/80 border-b border-red-800/50 text-red-200 px-4 py-2.5 text-sm flex items-center gap-2.5 shadow-sm">
-                    <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
-                    <span>{flash.error}</span>
-                </div>
-            )}
-            {flash?.info && (
-                <div className="bg-cyan-950/80 border-b border-cyan-800/50 text-cyan-200 px-4 py-2.5 text-sm flex items-center gap-2.5 shadow-sm">
-                    <Info className="h-4 w-4 text-cyan-400 shrink-0" />
-                    <span>{flash.info}</span>
-                </div>
-            )}
-
-            {/* Sub-header / Breadcrumb Bar */}
-            {title && (
-                <div className="bg-slate-900/40 border-b border-slate-800/60 py-4 px-4 sm:px-6 lg:px-8">
-                    <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                        <div>
-                            <h1 className="text-xl sm:text-2xl font-heading font-bold text-white tracking-tight flex items-center gap-2">
-                                {title}
-                            </h1>
-                            {subtitle && (
-                                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                                    {subtitle}
-                                </p>
-                            )}
+                {/* Regulatory Citation Footer Badge */}
+                <div className="p-3 border-t border-[#1C3554] bg-[#0E1B2C]/70">
+                    <div className="p-2.5 rounded-lg bg-[#14263D] border border-[#1C3554] text-[11px] space-y-1">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                            <span>Statutory Registry</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                                Regulated under Laws of Zimbabwe
+                        <p className="text-[10px] text-slate-400 leading-snug">
+                            Grounded in Acts & SIs of Zimbabwe. Deterministic rules engine active.
+                        </p>
+                    </div>
+                </div>
+            </aside>
+
+            {/* Mobile Navigation Drawer */}
+            {mobileNavOpen && (
+                <div className="fixed inset-0 z-50 lg:hidden">
+                    <div
+                        onClick={() => setMobileNavOpen(false)}
+                        className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs"
+                    />
+                    <div className="fixed inset-y-0 left-0 w-64 bg-[#14263D] text-white p-4 flex flex-col z-50">
+                        <div className="flex items-center justify-between pb-4 border-b border-[#1C3554]">
+                            <div className="flex items-center gap-2">
+                                <div className="h-8 w-8 rounded-lg bg-[#19766F] flex items-center justify-center font-bold">
+                                    <Shield className="h-4 w-4 text-white" />
+                                </div>
+                                <span className="font-heading font-bold text-sm">ZimComply AI</span>
+                            </div>
+                            <button
+                                onClick={() => setMobileNavOpen(false)}
+                                className="p-1 rounded-lg hover:bg-slate-800"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <nav className="flex-1 py-4 space-y-1 overflow-y-auto">
+                            {navItems.map((item) => (
+                                <Link
+                                    key={item.name}
+                                    href={item.href}
+                                    onClick={() => setMobileNavOpen(false)}
+                                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium ${
+                                        item.active ? 'bg-[#19766F] text-white font-semibold' : 'text-slate-300 hover:bg-[#1C3554]'
+                                    }`}
+                                >
+                                    <item.icon className="h-4 w-4" />
+                                    <span>{item.name}</span>
+                                </Link>
+                            ))}
+                        </nav>
+                    </div>
+                </div>
+            )}
+
+            {/* Main Application Area (Header + Body) */}
+            <div className="flex-1 flex flex-col lg:pl-64 min-w-0">
+                {/* Institutional Top Header */}
+                <header className="sticky top-0 z-20 h-16 bg-white border-b border-slate-200 shadow-2xs flex items-center justify-between px-4 sm:px-6 lg:px-8">
+                    {/* Left: Mobile Toggle & Breadcrumbs */}
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setMobileNavOpen(true)}
+                            className="lg:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                            aria-label="Open menu"
+                        >
+                            <Menu className="h-5 w-5" />
+                        </button>
+
+                        {/* Breadcrumbs */}
+                        <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500">
+                            <span className="font-medium text-slate-700">
+                                {auth.active_tenant?.name || 'Workspace'}
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                            <span className="font-semibold text-slate-900">
+                                {currentNavItem.name}
                             </span>
                         </div>
                     </div>
-                </div>
-            )}
 
-            {/* Main Page Body */}
-            <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-                {children}
-            </main>
+                    {/* Right: Search, AI Advisor Toggle, Notifications & User Menu */}
+                    <div className="flex items-center gap-2.5 sm:gap-3">
+                        {/* Contextual AI Regulatory Advisor Button */}
+                        <button
+                            type="button"
+                            onClick={() => setAiDrawerOpen(true)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#e2f4f2] hover:bg-[#cbeee9] border border-[#a5dcd6] text-[#125752] text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+                        >
+                            <Sparkles className="h-3.5 w-3.5 text-[#19766F]" />
+                            <span className="hidden md:inline">Regulatory AI Advisor</span>
+                        </button>
 
-            {/* Modern Footer */}
-            <footer className="border-t border-slate-800 bg-slate-900/60 py-6 text-xs text-slate-400">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                        <span className="font-bold text-slate-300">ZimComply AI</span>
-                        <span>•</span>
-                        <span>Multi-Tenant Zimbabwe Compliance SaaS</span>
+                        {/* Notifications Indicator */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                                aria-label="Notifications"
+                            >
+                                <Bell className="h-4 w-4" />
+                                <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-[#B84B46]" />
+                            </button>
+                        </div>
+
+                        {/* User Account Dropdown */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                                className="flex items-center gap-2 p-1 rounded-lg hover:bg-slate-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-600"
+                                aria-expanded={userMenuOpen}
+                                aria-label="User account menu"
+                            >
+                                <div className="h-8 w-8 rounded-lg bg-[#14263D] text-white flex items-center justify-center font-bold text-xs">
+                                    {auth.user?.name ? auth.user.name.charAt(0).toUpperCase() : 'U'}
+                                </div>
+                                <div className="hidden sm:block text-left">
+                                    <div className="text-xs font-semibold text-slate-900 leading-tight">
+                                        {auth.user?.name || 'Administrator'}
+                                    </div>
+                                    <div className="text-[10px] text-slate-500">
+                                        {auth.role || 'Compliance Lead'}
+                                    </div>
+                                </div>
+                                <ChevronDown className="h-3 w-3 text-slate-400 hidden sm:block" />
+                            </button>
+
+                            {userMenuOpen && (
+                                <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-50">
+                                    <div className="px-4 py-2 border-b border-slate-100">
+                                        <div className="text-xs font-bold text-slate-900">{auth.user?.name}</div>
+                                        <div className="text-[11px] text-slate-500 truncate">{auth.user?.email}</div>
+                                        <div className="mt-1">
+                                            <Badge variant="teal" size="sm">
+                                                Role: {auth.role || 'Admin'}
+                                            </Badge>
+                                        </div>
+                                    </div>
+
+                                    <Link
+                                        href="/settings"
+                                        onClick={() => setUserMenuOpen(false)}
+                                        className="flex items-center gap-2 px-4 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                                    >
+                                        <Settings className="h-4 w-4 text-slate-400" />
+                                        <span>Company Settings</span>
+                                    </Link>
+
+                                    <Link
+                                        href="/logout"
+                                        method="post"
+                                        as="button"
+                                        className="w-full text-left flex items-center gap-2 px-4 py-2 text-xs text-[#B84B46] hover:bg-red-50 border-t border-slate-100"
+                                    >
+                                        <LogOut className="h-4 w-4" />
+                                        <span>Sign Out</span>
+                                    </Link>
+                                </div>
+                            )}
+                        </div>
                     </div>
-                    <div className="text-slate-500 text-center sm:text-right">
-                        Notice: Compliance assistance & workflow platform. Statutory rules cited from official Zimbabwean Gazettes.
+                </header>
+
+                {/* Flash Alerts */}
+                {flash?.success && (
+                    <div className="bg-emerald-50 border-b border-emerald-200 text-emerald-800 px-6 py-2.5 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>{flash.success}</span>
                     </div>
-                </div>
-            </footer>
+                )}
+                {flash?.error && (
+                    <div className="bg-[#fdf2f2] border-b border-[#f5c7c5] text-[#933632] px-6 py-2.5 text-xs flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-[#B84B46] shrink-0" />
+                        <span>{flash.error}</span>
+                    </div>
+                )}
+                {flash?.info && (
+                    <div className="bg-sky-50 border-b border-sky-200 text-sky-800 px-6 py-2.5 text-xs flex items-center gap-2">
+                        <Info className="h-4 w-4 text-sky-600 shrink-0" />
+                        <span>{flash.info}</span>
+                    </div>
+                )}
+
+                {/* Page Title & Context Header Bar */}
+                {title && (
+                    <div className="bg-white border-b border-slate-200/90 py-5 px-4 sm:px-6 lg:px-8">
+                        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div>
+                                <h1 className="text-xl sm:text-2xl font-heading font-extrabold text-[#14263D] tracking-tight">
+                                    {title}
+                                </h1>
+                                {subtitle && (
+                                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                                        {subtitle}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                                <Badge variant="teal" size="md" dot>
+                                    Statutory Jurisdiction: Republic of Zimbabwe
+                                </Badge>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Main Content Body */}
+                <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                    {children}
+                </main>
+
+                {/* Institutional Clean Enterprise Footer */}
+                <footer className="border-t border-slate-200 bg-white py-4 px-4 sm:px-6 lg:px-8 text-xs text-slate-500">
+                    <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-800">ZimComply AI</span>
+                            <span>•</span>
+                            <span>Zimbabwe Statutory & Corporate Compliance SaaS</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 text-center sm:text-right">
+                            Deterministic Rule Engine • ADR-0005 Governance • Official Gazetted Zimbabwean Statutory Instruments
+                        </div>
+                    </div>
+                </footer>
+            </div>
+
+            {/* Contextual AI Regulatory Assistant Drawer */}
+            <AiDrawer
+                isOpen={aiDrawerOpen}
+                onClose={() => setAiDrawerOpen(false)}
+                activeContext={title}
+            />
         </div>
     );
 }

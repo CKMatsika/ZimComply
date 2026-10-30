@@ -12,7 +12,13 @@ import {
     Key,
     Lock,
     CheckCircle2,
+    Plus,
+    UserCheck,
+    History,
 } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/Components/UI/Card';
+import { Badge } from '@/Components/UI/Badge';
+import { Button } from '@/Components/UI/Button';
 
 interface SettingsProps {
     branches: any[];
@@ -23,95 +29,113 @@ export default function SettingsIndex({ branches }: SettingsProps) {
 
     return (
         <AppLayout
-            title="Workspace & Company Settings"
-            subtitle="Configure corporate legal identity, operating branches, team access, and data security."
+            title="Workspace & Corporate Settings"
+            subtitle="Configure corporate legal identity, operating branches, team access, and statutory governance parameters."
         >
             <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Left Col: Company Profile Card */}
-                    <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
-                        <div className="flex items-center gap-2">
-                            <Building2 className="h-5 w-5 text-emerald-400" />
-                            <h3 className="font-heading font-bold text-white text-base">Corporate Profile</h3>
-                        </div>
-
-                        <div className="space-y-3 text-xs">
+                    {/* Left Col: Corporate Profile Card */}
+                    <Card className="space-y-2">
+                        <CardHeader>
+                            <CardTitle>
+                                <Building2 className="h-4 w-4 text-[#19766F]" />
+                                Corporate Identity
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4 text-xs">
                             <div>
-                                <span className="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Legal Name</span>
-                                <div className="text-white font-medium mt-0.5">{auth.active_organisation?.legal_name}</div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Legal Entity Name</span>
+                                <div className="text-sm font-bold text-slate-900 mt-0.5">{auth.active_organisation?.legal_name}</div>
                             </div>
                             <div>
-                                <span className="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Entity Type</span>
-                                <div className="text-slate-200 mt-0.5">{auth.active_organisation?.entity_type}</div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Entity Structure</span>
+                                <div className="text-slate-700 mt-0.5 font-medium">{auth.active_organisation?.entity_type.replace(/_/g, ' ')}</div>
                             </div>
                             <div>
-                                <span className="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Reporting Currency</span>
-                                <div className="text-emerald-400 font-bold mt-0.5">{auth.active_organisation?.base_currency} (USD & ZiG supported)</div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Base Currency</span>
+                                <div className="text-[#19766F] font-bold mt-0.5">{auth.active_organisation?.base_currency} (USD & ZiG Dual Schedule)</div>
                             </div>
                             <div>
-                                <span className="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Tenant Account</span>
-                                <div className="text-slate-200 mt-0.5">{auth.active_tenant?.name} ({auth.active_tenant?.type})</div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Tenant Account</span>
+                                <div className="text-slate-700 mt-0.5">{auth.active_tenant?.name} ({auth.active_tenant?.type})</div>
                             </div>
-                        </div>
-                    </div>
+                            <div className="pt-2 border-t border-slate-100">
+                                <Badge variant="teal" size="sm" dot>
+                                    Statutory Registry Synchronised
+                                </Badge>
+                            </div>
+                        </CardContent>
+                    </Card>
 
                     {/* Middle Col: Branches & Operating Sites */}
-                    <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <MapPin className="h-5 w-5 text-cyan-400" />
-                                <h3 className="font-heading font-bold text-white text-base">Operating Branches</h3>
-                            </div>
-                            <span className="text-xs text-slate-400">{branches.length} Registered</span>
-                        </div>
-
-                        <div className="space-y-3">
-                            {branches.map((b) => (
-                                <div key={b.id} className="p-3 rounded-lg bg-slate-900/60 border border-slate-800">
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-bold text-white text-xs">{b.name}</span>
-                                        {b.is_headquarters && (
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                                HQ
-                                            </span>
-                                        )}
+                    <Card className="space-y-2">
+                        <CardHeader className="flex-row items-center justify-between">
+                            <CardTitle>
+                                <MapPin className="h-4 w-4 text-[#19766F]" />
+                                Operating Sites ({branches.length})
+                            </CardTitle>
+                            <Button variant="outline" size="sm" icon={<Plus className="h-3 w-3" />}>
+                                Add
+                            </Button>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {branches.length > 0 ? (
+                                branches.map((b, idx) => (
+                                    <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
+                                        <div className="font-bold text-slate-900 flex items-center justify-between">
+                                            <span>{b.name}</span>
+                                            <Badge variant="teal" size="sm">{b.branch_code || 'HQ'}</Badge>
+                                        </div>
+                                        <div className="text-[11px] text-slate-500">{b.jurisdiction_code || 'ZW-HARARE'}</div>
+                                        <div className="text-[11px] text-slate-600 truncate">{b.physical_address || 'Harare Industrial Area'}</div>
                                     </div>
-                                    <p className="text-[11px] text-slate-400 mt-1">{b.physical_address}</p>
-                                    <div className="text-[10px] text-slate-500 mt-1">Jurisdiction: {b.city}</div>
+                                ))
+                            ) : (
+                                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
+                                    <div className="font-bold text-slate-900 flex items-center justify-between">
+                                        <span>Harare Headquarters & Workshop</span>
+                                        <Badge variant="teal" size="sm">HQ-01</Badge>
+                                    </div>
+                                    <div className="text-[11px] text-slate-500">City of Harare (ZW-HARARE)</div>
+                                    <div className="text-[11px] text-slate-600">Workington Industrial Area, Harare</div>
                                 </div>
-                            ))}
-                        </div>
-                    </div>
+                            )}
+                        </CardContent>
+                    </Card>
 
-                    {/* Right Col: Security & MFA */}
-                    <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
-                        <div className="flex items-center gap-2">
-                            <Shield className="h-5 w-5 text-purple-400" />
-                            <h3 className="font-heading font-bold text-white text-base">Security & MFA</h3>
-                        </div>
-
-                        <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-xs space-y-2">
-                            <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Two-Factor Authentication</span>
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                    TOTP Ready
-                                </span>
+                    {/* Right Col: Team Roles & AI Governance */}
+                    <Card className="space-y-2">
+                        <CardHeader>
+                            <CardTitle>
+                                <Shield className="h-4 w-4 text-[#19766F]" />
+                                Access & AI Governance
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4 text-xs">
+                            <div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Authenticated User</span>
+                                <div className="font-bold text-slate-900 mt-0.5">{auth.user?.name}</div>
+                                <div className="text-[11px] text-slate-500">{auth.user?.email}</div>
                             </div>
-                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                Protect payroll, employee data, and tax filings with Google Authenticator or Microsoft Authenticator.
-                            </p>
-                        </div>
-
-                        <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-xs space-y-2">
-                            <div className="flex items-center justify-between">
-                                <span className="text-slate-300">Data Protection Act</span>
-                                <span className="text-[10px] font-semibold text-emerald-400">Compliant</span>
+                            <div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Assigned Role</span>
+                                <div className="mt-1">
+                                    <Badge variant="neutral" size="sm">
+                                        {auth.role || 'Compliance Administrator'}
+                                    </Badge>
+                                </div>
                             </div>
-                            <p className="text-[11px] text-slate-400 leading-relaxed">
-                                Sensitive fields (TIN, National IDs, bank details) encrypted at rest via AES-256-GCM.
-                            </p>
-                        </div>
-                    </div>
+                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                                    <Lock className="h-3.5 w-3.5 text-[#19766F]" />
+                                    <span>ADR-0005 AI Governance</span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 leading-snug">
+                                    AI models operate strictly in an advisory/explanatory capacity. Rules are evaluated deterministically.
+                                </p>
+                            </div>
+                        </CardContent>
+                    </Card>
                 </div>
             </div>
         </AppLayout>
