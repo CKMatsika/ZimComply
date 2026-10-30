@@ -16,6 +16,9 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        // 0. Seed Authoritative Zimbabwean Statutory Catalog
+        $this->call(RegulatoryCatalogSeeder::class);
+
         // 1. Seed SME Owner & Enterprise Account
         $smeUser = User::create([
             'name' => 'Tatenda Moyo',

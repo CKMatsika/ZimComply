@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
 *Last updated: 2026-10-30*  
-*Status: Phase 0 & Phase 1 Completed; PHP 8.4 & Laravel AI SDK Foundation Integrated & Verified (20/20 Automated Tests Passing)*
+*Status: Phase 0, Phase 1 & Milestone 2.1 Completed (25/25 Automated Tests Passing, 129 Assertions)*
 
 ---
 
@@ -16,13 +16,12 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 | **Phase 0** | Discovery, Environment & Architecture Baseline | **Completed** | Architecture specifications & ADRs verified |
 | **Phase 1** | SaaS Foundation, Multi-Tenancy, Auth & UI Shell | **Completed** | 11/11 automated tests passing, PostgreSQL 16 migrations executed, Vite build passing |
 | **Milestone 1.5** | PHP 8.4 Runtime & Official Laravel AI SDK Foundation | **Completed** | 20/20 automated tests passing (including 9 AI feature tests), side-by-side PHP 8.4 verified |
-| **Phase 2** | Registration-First MVP & Roadmap Engine | **Ready / Next** | Pending sign-off on AI SDK foundation |
-| **Phase 3** | Compliance Wallet, OCR/Extract & Renewals | Pending | Blocked by Phase 2 |
-| **Phase 4** | Employer, Payroll & Sector Compliance (NSSA, NEC, ZIMDEF) | Pending | Blocked by Phase 3 |
-| **Phase 5** | PRAZ Supplier Registration & Tender Intelligence | Pending | Blocked by Phase 4 |
-| **Phase 6** | AI Assistant & Regulatory Change Review System | Pending | Blocked by Phase 5 |
-| **Phase 7** | External Integrations & Multi-Client Accounting Portfolio | Pending | Blocked by Phase 6 |
-| **Phase 8** | Production Hardening, Security Audits & Rollout | Pending | Blocked by Phase 7 |
+| **Milestone 2.1** | Regulatory Catalogue, Rule Governance, Schema & Seeders | **Completed** | 25/25 automated tests passing (129 assertions), PostgreSQL 16 migrations executed |
+| **Milestone 2.2** | Deterministic Rules Engine (Applicability & DAG Graph) | **Ready / Next** | Awaiting Milestone 2.1 user review & approval |
+| **Milestone 2.3** | Discovery Questionnaire Service & Persistence | Pending | Blocked by Milestone 2.2 |
+| **Milestone 2.4** | Document Storage & AI Extraction Pipeline | Pending | Blocked by Milestone 2.3 |
+| **Milestone 2.5** | Registration Workspace UI (React + Inertia) | Pending | Blocked by Milestone 2.4 |
+| **Milestone 2.6** | End-to-End Verification & Phase 2 Sign-off | Pending | Blocked by Milestone 2.5 |
 
 ---
 
@@ -33,125 +32,110 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 - **Preserved Legacy Runtime:** PHP 8.2.12 (`C:\xampp\php`, completely untouched and unmodified)
 - **Verified PHP 8.4 Extensions:** `bcmath`, `curl`, `dom`, `fileinfo`, `gd`, `intl`, `mbstring`, `openssl`, `pdo_pgsql`, `pgsql`, `pdo_sqlite`, `sqlite3`, `zip`, `Zend OPcache`
 - **Composer Executable:** Composer 2.10.2 via PHP 8.4 (`C:\php84\php.exe C:\ProgramData\ComposerSetup\bin\composer.phar`)
-- **Node.js & NPM:** Node.js v20.19.2 / NPM 11.6.0
 - **Database Engine:** PostgreSQL 16 (Port 5433, database `zimcomply` active and fully migrated) & SQLite (in-memory for automated testing)
 - **Frontend Stack:** React 18, TypeScript, Inertia.js (v3.5), Tailwind CSS v4, Lucide Icons, Vite 7
 - **AI SDK:** Official `laravel/ai` (v1.3.0) with provider configuration in `config/ai.php`
 
 ---
 
-## 3. AI Service Architecture & Governance Implementation (ADR-0005)
+## 3. Milestone 2.1 Deliverables (Regulatory Catalogue & Governance)
 
-Under conditional approval, the following architectural components were built and integrated into `app/Shared/Ai`:
+1. **Additive Database Migrations (PostgreSQL 16):**
+   - `2026_10_30_200001_create_regulatory_catalog_tables.php`:
+     - `regulatory_authorities`: Central catalog of statutory regulators, local councils, NECs, and professional bodies.
+     - `jurisdictions`: Provincial municipalities and councils.
+     - `regulatory_sources`: Gazetted Acts and Statutory Instruments with explicit verification statuses.
+     - `rule_packs`: Sectoral and statutory rule groupings.
+     - `rule_versions`: Effective-dated, parameterized rule bodies supporting dual-key approval and conflict prevention.
+     - `obligation_definitions`: Concrete compliance requirements classified by legal type with criteria schemas and prerequisite arrays.
+   - `2026_10_30_200002_create_registration_discovery_tables.php`:
+     - `registration_questionnaires`: Tenant-scoped discovery answers.
+     - `applicability_assessments`: Exact evaluation sessions capturing inputs and timestamps.
+     - `assessment_results`: Granular record linking each evaluated obligation to its specific rule version, decision, trigger reasons, and source citation.
+     - `obligation_instances`: Tenant-scoped instantiated compliance requirements tracking evidence levels (`VERIFIED_BY_ISSUER` vs `USER_DECLARED`).
+   - `2026_10_30_200003_create_compliance_documents_tables.php`:
+     - `compliance_documents`: Cryptographically hashed (SHA-256) document storage records with foreign keys to AI verification items and verifier users.
 
-1. **Database Migrations:**
-   - `2026_10_30_091507_create_agent_conversations_table.php`: Official Laravel AI SDK conversation and message persistence.
-   - `2026_10_30_100001_create_ai_usage_and_verification_tables.php`:
-     - `ai_usage_ledgers`: High-resolution token metering, provider/model attribution, USD cost tracking, and status logging.
-     - `ai_verification_items`: Mandatory Human-in-the-Loop review queue ensuring all AI-extracted registration entities remain `PENDING` until human approval.
+2. **Domain Models (`app/Domains/RegistrationEngine/Models`):**
+   - `RegulatoryAuthority`: Scoped by category (`category()`) and active status.
+   - `Jurisdiction`: Scoped by province and council type.
+   - `RegulatorySource`: Strict verification check (`isVerified()`).
+   - `RulePack`: Dynamic resolution of active effective-dated version (`activeVersion()`).
+   - `RuleVersion`: Implements dual-key approval (`submitForReview()`, `approve()`, `activate()`), preventing self-approval and automatically superseding overlapping active versions.
+   - `ObligationDefinition`: Legal classification helpers (`isMandatoryStatutory()`, `isConditionalStatutory()`, `isCollectiveBargaining()`, `isTenderSpecific()`, `isOptionalAssociation()`).
+   - `RegistrationQuestionnaire`: Tenant-scoped discovery sessions (`HasTenant`, `TenantScope`).
+   - `ApplicabilityAssessment`: Tenant-scoped evaluation session with relation to `assessment_results`.
+   - `AssessmentResult`: Tenant-scoped decision record with immutable rule version citation.
+   - `ObligationInstance`: Tenant-scoped obligation tracker distinguishing user declarations from verified issuer proof.
+   - `ComplianceDocument`: Private file records with SHA-256 verification.
 
-2. **Models & Tenant Scoping:**
-   - `App\Shared\Ai\Models\AiUsageLedger`: Scoped strictly to active tenant via `HasTenant` trait and `TenantScope`.
-   - `App\Shared\Ai\Models\AiVerificationItem`: Scoped strictly to active tenant; tracks proposed payload, confirmed payload, confidence score, and approving verifier.
-
-3. **Contracts & DTOs:**
-   - `AiUsageMonitorInterface` & `AiOrchestrationServiceInterface` in `App\Shared\Ai\Contracts`.
-   - `RoadmapExplanationRequest`, `RoadmapExplanationResponse`, and `ExtractedRegistrationData` in `App\Shared\Ai\DTOs`.
-
-4. **Data Privacy & PII Sanitization (`DataPrivacySanitizer`):**
-   - Intercepts all prompt payloads before dispatch.
-   - Redacts Zimbabwe National ID numbers (`\b\d{2}-\d{6,7}\s*[A-Za-z]\s*\d{2}\b`), passwords, API keys, and payment card numbers.
-
-5. **Official Laravel AI SDK Structured Agents:**
-   - `RegistrationRoadmapAgent`: Implements `Agent`, `Conversational`, `HasStructuredOutput`; grounds advice strictly in Zimbabwean Acts (COBE [Chapter 24:31], ZIMRA, NSSA, PRAZ).
-   - `RegistrationDocumentExtractorAgent`: Implements `Agent`, `Conversational`, `HasStructuredOutput`; extracts company name, registration number, incorporation date, directors, and tax clearance number with confidence scoring.
-
-6. **Usage Metering & Quota Management (`AiUsageMonitor`):**
-   - Dynamically calculates approximate USD API expenditure based on model token rates.
-   - Enforces tier-based monthly limits (Free: 25,000 tokens, Standard: 150,000 tokens, Enterprise: 1,000,000 tokens).
-   - Blocks execution with `RuntimeException` if monthly quota is exhausted.
+3. **Authoritative Seeders (`RegulatoryCatalogSeeder`):**
+   - Seeded **11 Authorities**, **6 Jurisdictions**, **11 Sources**, **6 Rule Packs**, **6 Rule Versions**, and **12 Obligation Definitions**.
+   - Verified Acts and SIs: COBE Act [Chapter 24:31], Income Tax Act [Chapter 23:06], VAT Act [Chapter 23:12], NSSA Act [Chapter 17:04], ZIMDEF Act [Chapter 28:02], PPDPA Act [Chapter 22:23], Urban Councils Act [Chapter 29:15], Labour Act [Chapter 28:01] (SI 152/2017 & SI 135/2011), Engineering Council Act [Chapter 27:22].
+   - Tagged voluntary and unverified associations (e.g. CZI) as `OPTIONAL_ASSOCIATION` with status `REQUIRES_REVIEW` to exclude them from mandatory statutory roadmaps.
 
 ---
 
-## 4. Test Verification Ledger (20/20 Passing, 87 Assertions)
+## 4. Test Verification Ledger (25/25 Passing, 129 Assertions)
 
 Executed using `C:\php84\php.exe artisan test`:
 
 ```
 PASS  Tests\Unit\ExampleTest
-✓ that true is true                                                                                            0.02s  
+✓ that true is true                                                                                            0.01s  
 
 PASS  Tests\Feature\Ai\AiServiceIntegrationTest
-✓ ai roadmap agent generates structured explanation with metered usage                                         0.74s  
+✓ ai roadmap agent generates structured explanation with metered usage                                         0.67s  
 
 PASS  Tests\Feature\Ai\DataPrivacySanitizerTest
 ✓ sanitizer masks zimbabwe national id numbers                                                                 0.03s  
-✓ sanitizer masks api keys and passwords                                                                       0.02s  
+✓ sanitizer masks api keys and passwords                                                                       0.03s  
 ✓ sanitizer cleans nested payloads                                                                             0.02s  
 
 PASS  Tests\Feature\Ai\StructuredDocumentExtractionTest
 ✓ document extraction creates pending verification item and human approves                                     0.05s  
-✓ document extraction can be rejected by human verifier                                                        0.04s  
+✓ document extraction can be rejected by human verifier                                                        0.03s  
 
 PASS  Tests\Feature\Ai\TenantAiIsolationTest
-✓ tenant cannot see another tenants ai usage ledgers                                                           0.04s  
-✓ tenant cannot approve another tenants verification item                                                      0.03s  
-✓ ai request aborts when tenant exceeds monthly quota                                                          0.03s  
+✓ tenant cannot see another tenants ai usage ledgers                                                           0.03s  
+✓ tenant cannot approve another tenants verification item                                                      0.04s  
+✓ ai request aborts when tenant exceeds monthly quota                                                          0.05s  
 
 PASS  Tests\Feature\AuthenticationTest
-✓ login screen renders successfully                                                                            1.95s  
-✓ user can login with valid credentials                                                                        0.70s  
-✓ user cannot login with invalid credentials                                                                   0.23s  
-✓ new sme registration initializes tenant hierarchy                                                            0.17s  
+✓ login screen renders successfully                                                                            0.21s  
+✓ user can login with valid credentials                                                                        0.07s  
+✓ user cannot login with invalid credentials                                                                   0.25s  
+✓ new sme registration initializes tenant hierarchy                                                            0.08s  
 
 PASS  Tests\Feature\ExampleTest
-✓ guest is redirected to login                                                                                 0.06s  
+✓ guest is redirected to login                                                                                 0.04s  
 ✓ login page returns successful response                                                                       0.04s  
 
 PASS  Tests\Feature\NavigationWorkspacesTest
-✓ guest is redirected to login on protected routes                                                             0.06s  
-✓ authenticated user can access all core navigation workspaces                                                 0.07s  
+✓ guest is redirected to login on protected routes                                                             0.05s  
+✓ authenticated user can access all core navigation workspaces                                                 0.08s  
+
+PASS  Tests\Feature\Registration\RegulatoryCatalogTest
+✓ regulatory authorities and categories are properly distinguished                                             0.09s  
+✓ regulatory sources enforce verification status                                                               0.07s  
+✓ obligation definitions distinguish legal classifications                                                     0.08s  
+✓ rule version governance enforces dual key approval and superseding                                           0.10s  
+✓ assessment results link exact rule versions and preserve tenant isolation                                    0.13s  
 
 PASS  Tests\Feature\TenantIsolationTest
-✓ tenant scope prevents cross tenant data access                                                               0.04s  
-✓ branch creation automatically injects active tenant id                                                       0.03s  
+✓ tenant scope prevents cross tenant data access                                                               0.05s  
+✓ branch creation automatically injects active tenant id                                                       0.06s  
 
-Tests:    20 passed (87 assertions)
-Duration: 4.73s
-```
-
-Platform Check:
-```
-C:\php84\php.exe C:\ProgramData\ComposerSetup\bin\composer.phar check-platform-reqs
-Checking platform requirements for packages in the vendor dir
-All platform requirements met successfully.
-```
-
-Frontend Build:
-```
-npm run build
-vite v7.3.7 building client environment for production...
-✓ 2681 modules transformed.
-public/build/assets/app-DBqDPVv3.js   433.44 kB │ gzip: 127.87 kB
-✓ built in 24.59s
+Tests:    25 passed (129 assertions)
+Duration: 2.71s
 ```
 
 ---
 
-## 5. Rollback Procedure
+## 5. Next Steps (Pending Milestone 2.1 Approval)
 
-If reversion to PHP 8.2 or custom HTTP drivers is ever required:
-1. `C:\xampp\php` remains completely unmodified and immediately usable for running the core application.
-2. The AI service layer is decoupled behind `AiOrchestrationServiceInterface` and `AiUsageMonitorInterface`, allowing driver replacement without rewriting domain logic.
-3. Database migrations are purely additive (`ai_usage_ledgers`, `ai_verification_items`, `agent_conversations`); existing core tenant, user, organisation, and audit tables remain untouched.
-4. To revert composer packages: `git checkout master -- composer.json composer.lock` followed by `composer install`.
-
----
-
-## 6. Next Steps for Phase 2 Implementation
-
-With the PHP 8.4 runtime and Laravel AI SDK foundation validated and tested:
-1. Implement Module M02: Regulatory Authorities and Obligation Definitions catalogs with Zimbabwean legal seeders.
-2. Build the interactive Discovery Questionnaire engine evaluating business activities, turnover brackets, headcount, and premises.
-3. Build the dynamic **Roadmap Generator Action** producing cited, conditional registration roadmaps with prerequisites and fee sources.
-4. Connect the `RegistrationRoadmapAgent` and `RegistrationDocumentExtractorAgent` to the `/registration` workspace for plain-English AI explanations and document OCR extraction.
+Upon user review and authorization of Milestone 2.1:
+1. Proceed with **Milestone 2.2**: Implement `ApplicabilityEvaluator` (100% deterministic rule matching against active verified `RuleVersion` records) and `DependencyGraph` (DAG topological sorting with circular dependency detection).
+2. Proceed with **Milestone 2.3**: Build Discovery Questionnaire submission, draft persistence, and reassessment actions.
+3. Proceed with **Milestone 2.4**: Implement secure document uploads, SHA-256 checksums, and AI extraction verification queue.
+4. Proceed with **Milestone 2.5**: Construct the React + Inertia Registration Workspace UI.
