@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
 *Last updated: 2026-10-30*  
-*Status: Phase 0 (Architecture & Specification Baseline) Completed*
+*Status: Phase 0 & Phase 1 Completed (Verified via 11 Automated Tests)*
 
 ---
 
@@ -14,8 +14,8 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 | Phase | Description | Status | Verification Gate |
 |---|---|---|---|
 | **Phase 0** | Discovery, Environment & Architecture Baseline | **Completed** | Architecture specifications & ADRs verified |
-| **Phase 1** | SaaS Foundation, Multi-Tenancy, Auth & UI Shell | **Ready for Review / Approval** | Pending Phase 0 sign-off |
-| **Phase 2** | Registration-First MVP & Roadmap Engine | Pending | Blocked by Phase 1 |
+| **Phase 1** | SaaS Foundation, Multi-Tenancy, Auth & UI Shell | **Completed** | 11/11 automated tests passing, PostgreSQL 16 migrations executed, Vite/React build passing |
+| **Phase 2** | Registration-First MVP & Roadmap Engine | **Ready / Next** | Pending Phase 1 sign-off |
 | **Phase 3** | Compliance Wallet, OCR/Extract & Renewals | Pending | Blocked by Phase 2 |
 | **Phase 4** | Employer, Payroll & Sector Compliance (NSSA, NEC, ZIMDEF) | Pending | Blocked by Phase 3 |
 | **Phase 5** | PRAZ Supplier Registration & Tender Intelligence | Pending | Blocked by Phase 4 |
@@ -32,55 +32,84 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 - **Composer:** Version 2.10.2
 - **Node.js:** v20.19.2
 - **NPM:** 11.6.0
-- **Database Engine:** PostgreSQL 16 (Service `postgresql-x64-16` active on localhost) & SQLite (available for fast in-memory CI unit testing)
-- **Version Control:** Git repository initialized; initial branch configured.
+- **Database Engine:** PostgreSQL 16 (Port 5433, database `zimcomply` active and migrated) & SQLite (in-memory for CI unit testing)
+- **Frontend Stack:** React 18, TypeScript, Inertia.js (v3.5), Tailwind CSS v4, Lucide Icons, Vite 7
 
 ---
 
-## 3. Phase 0 Deliverables Inventory
+## 3. Phase 1 Deliverables Summary
 
-The following architectural foundations and governance documents have been authored and verified against the master specification:
-
-1. **[docs/ARCHITECTURE.md](file:///c:/Users/User/Desktop/ZimComply/docs/ARCHITECTURE.md)**: System topology, modular Laravel monolith layout, domain service boundaries, React/Inertia frontend structure, event orchestration, and job queues.
-2. **[docs/ERD.md](file:///c:/Users/User/Desktop/ZimComply/docs/ERD.md)**: Complete database entity-relationship design encompassing all 45+ core entities, tenant scoping rules, composite keys, monetary decimal types, and JSON schema boundaries.
-3. **[docs/REGULATORY_SOURCE_REGISTER.md](file:///c:/Users/User/Desktop/ZimComply/docs/REGULATORY_SOURCE_REGISTER.md)**: Catalog of Zimbabwean statutory bodies (ZIMRA, NSSA, PRAZ, NECs, Municipal Councils, ZINARA, ECZ, etc.), legislation citations, source dates, and research backlog.
-4. **[docs/RULE_GOVERNANCE.md](file:///c:/Users/User/Desktop/ZimComply/docs/RULE_GOVERNANCE.md)**: Single-source-of-truth governance model for statutory rule packs, effective date handling, dual-currency calculations, immutable audit trails, and strict separation between deterministic rules and generative AI.
-5. **[docs/MODULES.md](file:///c:/Users/User/Desktop/ZimComply/docs/MODULES.md)**: Deep breakdown of modules M01 through M14, detailing responsibility boundaries, event publishers/subscribers, data models, and external touchpoints.
-6. **[docs/SECURITY.md](file:///c:/Users/User/Desktop/ZimComply/docs/SECURITY.md)**: Multi-tenant data isolation, role-based and permission-based access control, cryptographic key management, Zimbabwe Cyber & Data Protection Act compliance, and segregation of duties.
-7. **[docs/API_INTEGRATIONS.md](file:///c:/Users/User/Desktop/ZimComply/docs/API_INTEGRATIONS.md)**: Strategy and adapter specifications for external ERPs (Pastel, Sage, Xero, QuickBooks, ERPNext, future Smart ERP), bank/payment gateways (Paynow, EcoCash, InnBucks), and strict guidelines for regulatory portals.
-8. **[docs/DEVELOPMENT_ROADMAP.md](file:///c:/Users/User/Desktop/ZimComply/docs/DEVELOPMENT_ROADMAP.md)**: Detailed phase breakdown, milestones, test gates, and rollback plans.
-9. **[docs/DEPLOYMENT.md](file:///c:/Users/User/Desktop/ZimComply/docs/DEPLOYMENT.md)**: Infrastructure configuration for Laravel Cloud / Linux VPS, PostgreSQL connection pooling, Redis caching/queues, and PWA build steps.
-10. **[docs/TESTING.md](file:///c:/Users/User/Desktop/ZimComply/docs/TESTING.md)**: Multi-layer testing strategy (Unit, Feature, Tenant Isolation, Statutory Rule Verification, Frontend Component, and E2E Scenarios).
-11. **[docs/USER_GUIDE.md](file:///c:/Users/User/Desktop/ZimComply/docs/USER_GUIDE.md)**: User persona onboarding workflows, dashboard navigation paths, and compliance wallet instructions.
-12. **Architecture Decision Records (`docs/DECISIONS/`)**:
-    - `ADR-0001`: Modular Monolith Architecture (Laravel 11 + Inertia.js + React 18 + TypeScript + Tailwind CSS).
-    - `ADR-0002`: Multi-Tenant Data Isolation Strategy (Tenant-scoped database architecture with global query scopes and tenant middleware).
-    - `ADR-0003`: Deterministic Statutory Rule Engine and Effective-Dated Versioning.
-    - `ADR-0004`: 5-Tier Evidence Trust Lifecycle (`verified_by_issuer`, `document_supported`, `user_declared`, `inferred`, `unknown`).
-    - `ADR-0005`: Safe AI Boundary & Human-in-the-Loop Review Pipeline.
-    - `ADR-0006`: Dual-Currency Financial Architecture (USD & ZiG precision handling).
-
----
-
-## 4. Known Risks, Gaps & Regulatory Uncertainties
-
-1. **Statutory Rate Volatility & Currency Fluctuations:**
-   - *Risk:* Zimbabwe uses a multi-currency regime with the Zimbabwe Gold (ZiG) and USD. Statutory thresholds (e.g., ZIMRA PAYE tax bands, NSSA contribution ceilings) change via periodic Statutory Instruments (SIs).
-   - *Mitigation:* Zero hardcoded rates in application code. All calculations pull from database-backed `rule_packs` parameterized by effective date ranges and currency.
-2. **Medical Aid Compulsion in NEC Engineering:**
-   - *Risk:* Collective Bargaining Agreements in the Engineering, Iron and Steel Industry specify specific schemes (e.g. Engineering Medical Fund). Scope of compulsion across employee grades requires verified SI reference.
-   - *Mitigation:* Flagged as *Verification Required*. System permits configuration but does not mark non-membership as a statutory violation until legally certified.
-3. **Regulator Portal Automation Limits:**
-   - *Risk:* Regulators (ZIMRA TaRMS, PRAZ e-GP, NSSA Self-Service Portal) have strict terms of service and lack public write APIs.
-   - *Mitigation:* ZimComply AI explicitly avoids unauthorized scraping or credential sharing. Instead, it prepares submission-ready dossiers, pre-validates data, generates compliant CSV/PDF returns, and tracks submission acknowledgements uploaded by authorized users.
+1. **Framework & Scaffolding:**
+   - Laravel 12 (latest stable) initialized and configured on PHP 8.2.
+   - Dual-database support: PostgreSQL 16 on port 5433 for operational persistence, SQLite in-memory for testing.
+   - Vite 7 + React 18 + TypeScript + Tailwind CSS compilation pipeline verified (2681 modules built in 19.65s).
+2. **Database Migrations (PostgreSQL 16):**
+   - `tenants` (UUID, Name, Type, Status, Trial Date)
+   - `organisations` (UUID, Tenant FK, Legal/Trading Names, Encrypted TIN, Incorporation details, Currency)
+   - `branches` (UUID, Tenant FK, Org FK, Physical Address, HQ flag)
+   - `users` (UUID, Name, Email, Phone, Password, Encrypted MFA Secret)
+   - `memberships` (UUID, Tenant FK, User FK, Org FK, Roles: OWNER, ADMIN, ACCOUNTANT, HR_OFFICER, etc.)
+   - `subscriptions` (UUID, Tenant FK, Plan codes, Entitlements JSON, Starts/Expires)
+   - `audit_events` (UUID, Tenant FK, User FK, Event Type, Auditable Type/ID, Old/New Values, IP, UA)
+3. **Multi-Tenancy & Isolation Engine:**
+   - `TenantContext`: Application singleton tracking active tenant and active organisation.
+   - `TenantScope`: Global Eloquent query scope automatically appending `WHERE tenant_id = ?`.
+   - `HasTenant`: Trait automating UUID generation, global scope registration, and auto-injection of `tenant_id`.
+   - `EnforceTenantContext`: Web middleware resolving tenant membership from session.
+4. **Authentication & Session Management:**
+   - `AuthController`: Handles login, registration with instant tenant/org bootstrapping, session logout, and live company switching.
+   - Multi-factor authentication (MFA TOTP) readiness.
+5. **Responsive Application Shell & 7-Verb Navigation:**
+   - `AppLayout.tsx`: Header with brand insignia, active company switcher dropdown, user menu, mobile drawer, flash banners.
+   - **Register** (`/registration`): Registration discovery questionnaire and statutory roadmap.
+   - **Comply** (`/comply`): Periodic monthly compliance (ZIMRA PAYE, NSSA POBS/APWCS, ZIMDEF, NEC dues).
+   - **Renew** (`/renew`): Licence and asset renewals (City Council, ZINARA vehicle licences, insurance, radio discs).
+   - **Tender** (`/tender`): PRAZ e-GP categories, public procurement notice feeds, bid-readiness matrix.
+   - **Documents** (`/documents`): Compliance Wallet vault with 5-tier evidence trust level badges.
+   - **Reports** (`/reports`): 90-day cash-flow liability forecasting and one-click Compliance Audit Pack generation.
+   - **Settings** (`/settings`): Corporate legal profile, branch directory, team access, and data security.
+6. **Database Seeders:**
+   - Seeded sample SME: "Apex Engineering & Fabrication (Pvt) Ltd" (`admin@apex.co.zw` / `Password123!`).
+   - Seeded sample Accounting Firm: "Chiroro & Partners Business Advisory" (`consultant@chiroro.co.zw` / `Password123!`) managing multiple client companies.
 
 ---
 
-## 5. Next Steps for Phase 1 Implementation
+## 4. Test Verification Ledger (100% Passing)
 
-Upon product owner review and approval of Phase 0 documentation:
-1. Scaffold Laravel 11 application with PHP 8.2 and PostgreSQL 16.
-2. Configure Inertia.js + React + TypeScript + Tailwind CSS design system.
-3. Implement core multi-tenancy foundation (M01): Tenants, Organisations, Branches, Users, Roles, Permissions, and Tenant Scopes.
-4. Setup authentication with 2FA readiness, session security, and audit logging.
-5. Build the primary responsive application shell with guided navigation (**Register | Comply | Renew | Tender | Documents | Reports | Settings**).
+Executed via `php artisan test`:
+
+```
+PASS  Tests\Unit\ExampleTest
+✓ that true is true
+
+PASS  Tests\Feature\AuthenticationTest
+✓ login screen renders successfully
+✓ user can login with valid credentials
+✓ user cannot login with invalid credentials
+✓ new sme registration initializes tenant hierarchy
+
+PASS  Tests\Feature\ExampleTest
+✓ guest is redirected to login
+✓ login page returns successful response
+
+PASS  Tests\Feature\NavigationWorkspacesTest
+✓ guest is redirected to login on protected routes
+✓ authenticated user can access all core navigation workspaces
+
+PASS  Tests\Feature\TenantIsolationTest
+✓ tenant scope prevents cross tenant data access
+✓ branch creation automatically injects active tenant id
+
+Tests:    11 passed (45 assertions)
+Duration: 1.46s
+```
+
+---
+
+## 5. Next Steps for Phase 2 Implementation
+
+Upon product owner review of Phase 1:
+1. Implement Module M02: Regulatory Authorities and Obligation Definitions catalogs with Zimbabwean legal seeders.
+2. Build the interactive Discovery Questionnaire engine evaluating business activities, turnover brackets, headcount, and premises.
+3. Build the dynamic **Roadmap Generator Action** producing cited, conditional registration roadmaps with prerequisites and fee sources.
+4. Add user dispute / override workflows with justification logging.
