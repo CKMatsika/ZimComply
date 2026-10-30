@@ -4,9 +4,13 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\DashboardController;
 use Illuminate\Support\Facades\Route;
 
-// Public Guest Routes
+use App\Http\Controllers\LandingController;
+
+// Public Landing Page (accessible to all visitors)
+Route::get('/', [LandingController::class, 'index'])->name('home');
+
+// Public Guest Routes (login & registration)
 Route::middleware('guest')->group(function () {
-    Route::get('/', fn () => redirect()->route('login'));
     Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login']);
     Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
