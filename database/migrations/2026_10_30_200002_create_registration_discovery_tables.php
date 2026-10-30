@@ -11,6 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
+        Schema::dropIfExists('obligation_instances');
+        Schema::dropIfExists('assessment_results');
+        Schema::dropIfExists('applicability_assessments');
+        Schema::dropIfExists('registration_questionnaires');
+
         Schema::create('registration_questionnaires', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('tenant_id')->index();
@@ -25,7 +30,8 @@ return new class extends Migration
             $table->foreign('completed_by_user_id')->references('id')->on('users')->nullOnDelete();
             $table->timestamps();
 
-            $table->index(['tenant_id', 'organisation_id', 'status']);
+            // Explicit short index name to adhere to MySQL/MariaDB 64-char identifier limit
+            $table->index(['tenant_id', 'organisation_id', 'status'], 'reg_quest_tenant_org_status_idx');
         });
 
         Schema::create('applicability_assessments', function (Blueprint $table) {
@@ -43,7 +49,8 @@ return new class extends Migration
             $table->timestamp('generated_at');
             $table->timestamps();
 
-            $table->index(['tenant_id', 'organisation_id', 'generated_at']);
+            // Explicit short index name to adhere to MySQL/MariaDB 64-char identifier limit
+            $table->index(['tenant_id', 'organisation_id', 'generated_at'], 'app_assess_tenant_org_gen_idx');
         });
 
         Schema::create('assessment_results', function (Blueprint $table) {
@@ -56,7 +63,7 @@ return new class extends Migration
             $table->foreign('obligation_definition_id')->references('id')->on('obligation_definitions')->cascadeOnDelete();
             $table->uuid('rule_version_id')->nullable();
             $table->foreign('rule_version_id')->references('id')->on('rule_versions')->restrictOnDelete();
-            $table->string('decision', 32); // APPLICABLE, EXEMPT, OPTIONAL, UNCERTAIN, NOT_APPLICABLE
+            $table->string('decision', 32); // MANDATORY, CONDITIONAL, EXEMPT, NOT_APPLICABLE, UNVERIFIED_HOLD, REQUIRES_INFORMATION
             $table->string('legal_classification', 50); // MANDATORY_STATUTORY, CONDITIONAL_STATUTORY, CBA_COLLECTIVE_AGREEMENT, PROFESSIONAL_REGULATION, TENDER_SPECIFIC, OPTIONAL_ASSOCIATION
             $table->json('trigger_reasons'); // Explicit array of conditions that triggered this decision
             $table->string('rule_source_citation', 255)->nullable();
@@ -65,8 +72,9 @@ return new class extends Migration
             $table->timestamp('evaluated_at');
             $table->timestamps();
 
-            $table->index(['tenant_id', 'assessment_id', 'decision']);
-            $table->index(['tenant_id', 'obligation_definition_id']);
+            // Explicit short index names to adhere to MySQL/MariaDB 64-char identifier limit
+            $table->index(['tenant_id', 'assessment_id', 'decision'], 'assess_res_tenant_assess_dec_idx');
+            $table->index(['tenant_id', 'obligation_definition_id'], 'assess_res_tenant_def_idx');
         });
 
         Schema::create('obligation_instances', function (Blueprint $table) {
@@ -86,8 +94,9 @@ return new class extends Migration
             $table->text('exemption_reason')->nullable();
             $table->timestamps();
 
-            $table->unique(['organisation_id', 'definition_id']);
-            $table->index(['tenant_id', 'status']);
+            // Explicit short index names to adhere to MySQL/MariaDB 64-char identifier limit
+            $table->unique(['organisation_id', 'definition_id'], 'ob_inst_org_def_uniq');
+            $table->index(['tenant_id', 'status'], 'ob_inst_tenant_status_idx');
         });
     }
 

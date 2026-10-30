@@ -11,6 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
+        Schema::dropIfExists('compliance_documents');
+
         Schema::create('compliance_documents', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('tenant_id')->index();
@@ -36,8 +38,9 @@ return new class extends Migration
             $table->text('rejection_reason')->nullable();
             $table->timestamps();
 
-            $table->index(['tenant_id', 'organisation_id', 'document_type']);
-            $table->index(['tenant_id', 'verification_status']);
+            // Explicit short index names to adhere to MySQL/MariaDB 64-char identifier limit
+            $table->index(['tenant_id', 'organisation_id', 'document_type'], 'comp_docs_tenant_org_type_idx');
+            $table->index(['tenant_id', 'verification_status'], 'comp_docs_tenant_verif_idx');
         });
     }
 
