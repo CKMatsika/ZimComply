@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
 *Last updated: 2026-10-30*  
-*Status: Phase 0 & Phase 1 Completed (Verified via 11 Automated Tests)*
+*Status: Phase 0 & Phase 1 Completed; PHP 8.4 & Laravel AI SDK Foundation Integrated & Verified (20/20 Automated Tests Passing)*
 
 ---
 
@@ -9,13 +9,14 @@
 
 ZimComply AI is a Zimbabwe-focused SaaS platform designed to assist SMEs, accountants, payroll bureaus, and compliance consultants in registering, maintaining compliance, renewing licences, and qualifying for procurement opportunities.
 
-Following the mandatory **Codex Operating Instructions** (README Section 12 & 13), this document acts as the definitive single source of truth for implementation progress, completed deliverables, verification test results, identified risks, and phase gate approval states.
+Following the mandatory **Codex Operating Instructions** (README Section 12 & 13) and user conditional approval safeguards, this ledger tracks the implementation progress, runtime configuration, verified tests, and AI governance integration.
 
-| Phase | Description | Status | Verification Gate |
+| Phase / Milestone | Description | Status | Verification Gate |
 |---|---|---|---|
 | **Phase 0** | Discovery, Environment & Architecture Baseline | **Completed** | Architecture specifications & ADRs verified |
-| **Phase 1** | SaaS Foundation, Multi-Tenancy, Auth & UI Shell | **Completed** | 11/11 automated tests passing, PostgreSQL 16 migrations executed, Vite/React build passing |
-| **Phase 2** | Registration-First MVP & Roadmap Engine | **Ready / Next** | Pending Phase 1 sign-off |
+| **Phase 1** | SaaS Foundation, Multi-Tenancy, Auth & UI Shell | **Completed** | 11/11 automated tests passing, PostgreSQL 16 migrations executed, Vite build passing |
+| **Milestone 1.5** | PHP 8.4 Runtime & Official Laravel AI SDK Foundation | **Completed** | 20/20 automated tests passing (including 9 AI feature tests), side-by-side PHP 8.4 verified |
+| **Phase 2** | Registration-First MVP & Roadmap Engine | **Ready / Next** | Pending sign-off on AI SDK foundation |
 | **Phase 3** | Compliance Wallet, OCR/Extract & Renewals | Pending | Blocked by Phase 2 |
 | **Phase 4** | Employer, Payroll & Sector Compliance (NSSA, NEC, ZIMDEF) | Pending | Blocked by Phase 3 |
 | **Phase 5** | PRAZ Supplier Registration & Tender Intelligence | Pending | Blocked by Phase 4 |
@@ -25,91 +26,132 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 
 ---
 
-## 2. Environment Audit
+## 2. Runtime & Environment Audit
 
 - **Operating System:** Windows 10/11 x64 (PowerShell 7 / pwsh)
-- **PHP Runtime:** PHP 8.2.12 (CLI with `bcmath`, `curl`, `intl`, `mbstring`, `openssl`, `pdo_pgsql`, `pdo_sqlite`, `zip`, `gd`)
-- **Composer:** Version 2.10.2
-- **Node.js:** v20.19.2
-- **NPM:** 11.6.0
-- **Database Engine:** PostgreSQL 16 (Port 5433, database `zimcomply` active and migrated) & SQLite (in-memory for CI unit testing)
+- **Primary Development PHP Runtime:** PHP 8.4.25 (`C:\php84\php.exe`, ZTS Visual C++ 2022 x64)
+- **Preserved Legacy Runtime:** PHP 8.2.12 (`C:\xampp\php`, completely untouched and unmodified)
+- **Verified PHP 8.4 Extensions:** `bcmath`, `curl`, `dom`, `fileinfo`, `gd`, `intl`, `mbstring`, `openssl`, `pdo_pgsql`, `pgsql`, `pdo_sqlite`, `sqlite3`, `zip`, `Zend OPcache`
+- **Composer Executable:** Composer 2.10.2 via PHP 8.4 (`C:\php84\php.exe C:\ProgramData\ComposerSetup\bin\composer.phar`)
+- **Node.js & NPM:** Node.js v20.19.2 / NPM 11.6.0
+- **Database Engine:** PostgreSQL 16 (Port 5433, database `zimcomply` active and fully migrated) & SQLite (in-memory for automated testing)
 - **Frontend Stack:** React 18, TypeScript, Inertia.js (v3.5), Tailwind CSS v4, Lucide Icons, Vite 7
+- **AI SDK:** Official `laravel/ai` (v1.3.0) with provider configuration in `config/ai.php`
 
 ---
 
-## 3. Phase 1 Deliverables Summary
+## 3. AI Service Architecture & Governance Implementation (ADR-0005)
 
-1. **Framework & Scaffolding:**
-   - Laravel 12 (latest stable) initialized and configured on PHP 8.2.
-   - Dual-database support: PostgreSQL 16 on port 5433 for operational persistence, SQLite in-memory for testing.
-   - Vite 7 + React 18 + TypeScript + Tailwind CSS compilation pipeline verified (2681 modules built in 19.65s).
-2. **Database Migrations (PostgreSQL 16):**
-   - `tenants` (UUID, Name, Type, Status, Trial Date)
-   - `organisations` (UUID, Tenant FK, Legal/Trading Names, Encrypted TIN, Incorporation details, Currency)
-   - `branches` (UUID, Tenant FK, Org FK, Physical Address, HQ flag)
-   - `users` (UUID, Name, Email, Phone, Password, Encrypted MFA Secret)
-   - `memberships` (UUID, Tenant FK, User FK, Org FK, Roles: OWNER, ADMIN, ACCOUNTANT, HR_OFFICER, etc.)
-   - `subscriptions` (UUID, Tenant FK, Plan codes, Entitlements JSON, Starts/Expires)
-   - `audit_events` (UUID, Tenant FK, User FK, Event Type, Auditable Type/ID, Old/New Values, IP, UA)
-3. **Multi-Tenancy & Isolation Engine:**
-   - `TenantContext`: Application singleton tracking active tenant and active organisation.
-   - `TenantScope`: Global Eloquent query scope automatically appending `WHERE tenant_id = ?`.
-   - `HasTenant`: Trait automating UUID generation, global scope registration, and auto-injection of `tenant_id`.
-   - `EnforceTenantContext`: Web middleware resolving tenant membership from session.
-4. **Authentication & Session Management:**
-   - `AuthController`: Handles login, registration with instant tenant/org bootstrapping, session logout, and live company switching.
-   - Multi-factor authentication (MFA TOTP) readiness.
-5. **Responsive Application Shell & 7-Verb Navigation:**
-   - `AppLayout.tsx`: Header with brand insignia, active company switcher dropdown, user menu, mobile drawer, flash banners.
-   - **Register** (`/registration`): Registration discovery questionnaire and statutory roadmap.
-   - **Comply** (`/comply`): Periodic monthly compliance (ZIMRA PAYE, NSSA POBS/APWCS, ZIMDEF, NEC dues).
-   - **Renew** (`/renew`): Licence and asset renewals (City Council, ZINARA vehicle licences, insurance, radio discs).
-   - **Tender** (`/tender`): PRAZ e-GP categories, public procurement notice feeds, bid-readiness matrix.
-   - **Documents** (`/documents`): Compliance Wallet vault with 5-tier evidence trust level badges.
-   - **Reports** (`/reports`): 90-day cash-flow liability forecasting and one-click Compliance Audit Pack generation.
-   - **Settings** (`/settings`): Corporate legal profile, branch directory, team access, and data security.
-6. **Database Seeders:**
-   - Seeded sample SME: "Apex Engineering & Fabrication (Pvt) Ltd" (`admin@apex.co.zw` / `Password123!`).
-   - Seeded sample Accounting Firm: "Chiroro & Partners Business Advisory" (`consultant@chiroro.co.zw` / `Password123!`) managing multiple client companies.
+Under conditional approval, the following architectural components were built and integrated into `app/Shared/Ai`:
+
+1. **Database Migrations:**
+   - `2026_10_30_091507_create_agent_conversations_table.php`: Official Laravel AI SDK conversation and message persistence.
+   - `2026_10_30_100001_create_ai_usage_and_verification_tables.php`:
+     - `ai_usage_ledgers`: High-resolution token metering, provider/model attribution, USD cost tracking, and status logging.
+     - `ai_verification_items`: Mandatory Human-in-the-Loop review queue ensuring all AI-extracted registration entities remain `PENDING` until human approval.
+
+2. **Models & Tenant Scoping:**
+   - `App\Shared\Ai\Models\AiUsageLedger`: Scoped strictly to active tenant via `HasTenant` trait and `TenantScope`.
+   - `App\Shared\Ai\Models\AiVerificationItem`: Scoped strictly to active tenant; tracks proposed payload, confirmed payload, confidence score, and approving verifier.
+
+3. **Contracts & DTOs:**
+   - `AiUsageMonitorInterface` & `AiOrchestrationServiceInterface` in `App\Shared\Ai\Contracts`.
+   - `RoadmapExplanationRequest`, `RoadmapExplanationResponse`, and `ExtractedRegistrationData` in `App\Shared\Ai\DTOs`.
+
+4. **Data Privacy & PII Sanitization (`DataPrivacySanitizer`):**
+   - Intercepts all prompt payloads before dispatch.
+   - Redacts Zimbabwe National ID numbers (`\b\d{2}-\d{6,7}\s*[A-Za-z]\s*\d{2}\b`), passwords, API keys, and payment card numbers.
+
+5. **Official Laravel AI SDK Structured Agents:**
+   - `RegistrationRoadmapAgent`: Implements `Agent`, `Conversational`, `HasStructuredOutput`; grounds advice strictly in Zimbabwean Acts (COBE [Chapter 24:31], ZIMRA, NSSA, PRAZ).
+   - `RegistrationDocumentExtractorAgent`: Implements `Agent`, `Conversational`, `HasStructuredOutput`; extracts company name, registration number, incorporation date, directors, and tax clearance number with confidence scoring.
+
+6. **Usage Metering & Quota Management (`AiUsageMonitor`):**
+   - Dynamically calculates approximate USD API expenditure based on model token rates.
+   - Enforces tier-based monthly limits (Free: 25,000 tokens, Standard: 150,000 tokens, Enterprise: 1,000,000 tokens).
+   - Blocks execution with `RuntimeException` if monthly quota is exhausted.
 
 ---
 
-## 4. Test Verification Ledger (100% Passing)
+## 4. Test Verification Ledger (20/20 Passing, 87 Assertions)
 
-Executed via `php artisan test`:
+Executed using `C:\php84\php.exe artisan test`:
 
 ```
 PASS  Tests\Unit\ExampleTest
-✓ that true is true
+✓ that true is true                                                                                            0.02s  
+
+PASS  Tests\Feature\Ai\AiServiceIntegrationTest
+✓ ai roadmap agent generates structured explanation with metered usage                                         0.74s  
+
+PASS  Tests\Feature\Ai\DataPrivacySanitizerTest
+✓ sanitizer masks zimbabwe national id numbers                                                                 0.03s  
+✓ sanitizer masks api keys and passwords                                                                       0.02s  
+✓ sanitizer cleans nested payloads                                                                             0.02s  
+
+PASS  Tests\Feature\Ai\StructuredDocumentExtractionTest
+✓ document extraction creates pending verification item and human approves                                     0.05s  
+✓ document extraction can be rejected by human verifier                                                        0.04s  
+
+PASS  Tests\Feature\Ai\TenantAiIsolationTest
+✓ tenant cannot see another tenants ai usage ledgers                                                           0.04s  
+✓ tenant cannot approve another tenants verification item                                                      0.03s  
+✓ ai request aborts when tenant exceeds monthly quota                                                          0.03s  
 
 PASS  Tests\Feature\AuthenticationTest
-✓ login screen renders successfully
-✓ user can login with valid credentials
-✓ user cannot login with invalid credentials
-✓ new sme registration initializes tenant hierarchy
+✓ login screen renders successfully                                                                            1.95s  
+✓ user can login with valid credentials                                                                        0.70s  
+✓ user cannot login with invalid credentials                                                                   0.23s  
+✓ new sme registration initializes tenant hierarchy                                                            0.17s  
 
 PASS  Tests\Feature\ExampleTest
-✓ guest is redirected to login
-✓ login page returns successful response
+✓ guest is redirected to login                                                                                 0.06s  
+✓ login page returns successful response                                                                       0.04s  
 
 PASS  Tests\Feature\NavigationWorkspacesTest
-✓ guest is redirected to login on protected routes
-✓ authenticated user can access all core navigation workspaces
+✓ guest is redirected to login on protected routes                                                             0.06s  
+✓ authenticated user can access all core navigation workspaces                                                 0.07s  
 
 PASS  Tests\Feature\TenantIsolationTest
-✓ tenant scope prevents cross tenant data access
-✓ branch creation automatically injects active tenant id
+✓ tenant scope prevents cross tenant data access                                                               0.04s  
+✓ branch creation automatically injects active tenant id                                                       0.03s  
 
-Tests:    11 passed (45 assertions)
-Duration: 1.46s
+Tests:    20 passed (87 assertions)
+Duration: 4.73s
+```
+
+Platform Check:
+```
+C:\php84\php.exe C:\ProgramData\ComposerSetup\bin\composer.phar check-platform-reqs
+Checking platform requirements for packages in the vendor dir
+All platform requirements met successfully.
+```
+
+Frontend Build:
+```
+npm run build
+vite v7.3.7 building client environment for production...
+✓ 2681 modules transformed.
+public/build/assets/app-DBqDPVv3.js   433.44 kB │ gzip: 127.87 kB
+✓ built in 24.59s
 ```
 
 ---
 
-## 5. Next Steps for Phase 2 Implementation
+## 5. Rollback Procedure
 
-Upon product owner review of Phase 1:
+If reversion to PHP 8.2 or custom HTTP drivers is ever required:
+1. `C:\xampp\php` remains completely unmodified and immediately usable for running the core application.
+2. The AI service layer is decoupled behind `AiOrchestrationServiceInterface` and `AiUsageMonitorInterface`, allowing driver replacement without rewriting domain logic.
+3. Database migrations are purely additive (`ai_usage_ledgers`, `ai_verification_items`, `agent_conversations`); existing core tenant, user, organisation, and audit tables remain untouched.
+4. To revert composer packages: `git checkout master -- composer.json composer.lock` followed by `composer install`.
+
+---
+
+## 6. Next Steps for Phase 2 Implementation
+
+With the PHP 8.4 runtime and Laravel AI SDK foundation validated and tested:
 1. Implement Module M02: Regulatory Authorities and Obligation Definitions catalogs with Zimbabwean legal seeders.
 2. Build the interactive Discovery Questionnaire engine evaluating business activities, turnover brackets, headcount, and premises.
 3. Build the dynamic **Roadmap Generator Action** producing cited, conditional registration roadmaps with prerequisites and fee sources.
-4. Add user dispute / override workflows with justification logging.
+4. Connect the `RegistrationRoadmapAgent` and `RegistrationDocumentExtractorAgent` to the `/registration` workspace for plain-English AI explanations and document OCR extraction.

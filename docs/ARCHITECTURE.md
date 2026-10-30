@@ -223,3 +223,52 @@ $$\text{Rejection / Dispute Branch:} \quad \text{SUBMITTED} \longrightarrow \tex
 - **Field-Level Encryption:** Sensitive personal and corporate identifiers (Director National ID numbers, bank account numbers, TIN, employee medical aid numbers) use AES-256-GCM authenticated encryption (`encrypted` Eloquent casts).
 - **Object Storage:** Document uploads stored in S3-compatible private buckets with private access only. File access is mediated strictly via temporary signed URLs with 15-minute expirations.
 - **Audit Trails:** Immutable, append-only `audit_events` capturing: `id`, `tenant_id`, `user_id`, `event_type`, `auditable_type`, `auditable_id`, `old_values`, `new_values`, `ip_address`, `user_agent`, `created_at`.
+
+---
+
+## 10. AI Subsystem & Governance Architecture (Official Laravel AI SDK & ADR-0005)
+
+Integrated under PHP 8.4 with the official Laravel AI SDK (`laravel/ai` v1.3.0), the AI architecture mediates all machine learning capabilities through strict statutory boundaries, multi-tenant isolation, and privacy safeguards:
+
+```
++---------------------------------------------------------------------------------------+
+|                                    USER & TENANT CONTEXT                              |
+|   (Established via TenantContext singleton & EnforceTenantContext middleware)        |
++---------------------------------------------------------------------------------------+
+                                           |
+                                           v
++---------------------------------------------------------------------------------------+
+|                          AI ORCHESTRATION LAYER (app/Shared/Ai)                       |
+|  - AiOrchestrationService: Central gateway enforcing tenant validation & quota checks |
+|  - DataPrivacySanitizer: Masks Zimbabwe National IDs, passwords, API keys & secrets  |
+|  - AiUsageMonitor: High-resolution token metering, USD cost calculation, and limits   |
++---------------------------------------------------------------------------------------+
+                                           |
+                    +----------------------+----------------------+
+                    |                                             |
+                    v                                             v
++---------------------------------------+     +---------------------------------------+
+|       RegistrationRoadmapAgent        |     |  RegistrationDocumentExtractorAgent   |
+| - Implements HasStructuredOutput      |     | - Implements HasStructuredOutput      |
+| - Strictly grounded in Zimbabwe Acts  |     | - Extracts company, registration no., |
+|   (COBE Act 24:31, ZIMRA, NSSA, PRAZ) |     |   incorporation date, and directors   |
+| - Zero hallucinated statutory rules   |     | - Computes objective confidence score |
++---------------------------------------+     +---------------------------------------+
+                    |                                             |
+                    | (Structured Response)                       | (Proposed Entities)
+                    v                                             v
++---------------------------------------+     +---------------------------------------+
+|            ai_usage_ledgers           |     |         ai_verification_items         |
+|  - Tenant-isolated token consumption  |     |  - Mandatory Human-in-the-Loop review |
+|  - Provider, model, cost attribution  |     |  - PENDING -> VERIFIED / REJECTED     |
+|  - Immutable audit trail generation   |     |  - Prevents automated registry writes |
++---------------------------------------+     +---------------------------------------+
+```
+
+### Core AI Governance Tenets:
+1. **Statutory Integrity:** The AI Assistant never independently calculates statutory tax rates, penalty formulas, or deadlines. All outputs cite specific Zimbabwean Acts.
+2. **Mandatory Human-in-the-Loop Queue:** Extracted document parameters are queued as `PENDING` in `ai_verification_items`. They only commit to permanent company registries upon explicit human verification or rejection.
+3. **Multi-Tenant Metering & Isolation:** Usage ledgers are partitioned by `tenant_id` with `TenantScope`. Runaway API usage is preemptively halted when subscription tier token limits are reached.
+4. **Data Privacy Pre-processing:** Every prompt passes through `DataPrivacySanitizer` to redact sensitive identifiers before dispatch to external gateways.
+5. **Mocked Automated Testing:** Test suites execute 100% offline via `Ai::fakeAgent()`, guaranteeing zero external API cost and predictable CI/CD execution.
+
