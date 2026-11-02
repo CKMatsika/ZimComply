@@ -63,7 +63,8 @@ class RegistrationRoadmapGenerator
         ?string $questionnaireId = null,
         ?string $assessedByUserId = null,
         ?string $idempotencyKey = null,
-        bool $persist = true
+        bool $persist = true,
+        string $assessmentType = 'INITIAL_REGISTRATION'
     ): array {
         // Validate tenant & organisation
         $organisation = Organisation::where('id', $organisationId)
@@ -149,7 +150,8 @@ class RegistrationRoadmapGenerator
                 $businessProfile,
                 $fingerprint,
                 $idempotencyKey,
-                $decisions
+                $decisions,
+                $assessmentType
             ) {
                 // Ensure valid questionnaire record
                 $qId = $questionnaireId;
@@ -181,7 +183,7 @@ class RegistrationRoadmapGenerator
                     'tenant_id' => $tenantId,
                     'organisation_id' => $organisationId,
                     'questionnaire_id' => $qId,
-                    'assessment_type' => 'INITIAL_REGISTRATION',
+                    'assessment_type' => $assessmentType,
                     'evaluation_inputs' => array_merge($businessProfile, [
                         'idempotency_key' => $idempotencyKey ?? $fingerprint,
                         'assessment_date' => $evalDate->toDateString(),
@@ -363,6 +365,20 @@ class RegistrationRoadmapGenerator
             $def = $res->obligationDefinition;
             $rule = $res->ruleVersion;
 
+            $declared = null;
+            if ($def) {
+                $inst = ObligationInstance::where('organisation_id', $assessment->organisation_id)
+                    ->where('definition_id', $def->id)
+                    ->first();
+                if ($inst && !empty($inst->declared_registration_number)) {
+                    $declared = [
+                        'declared_number' => $inst->declared_registration_number,
+                        'declared_date' => $inst->declared_registered_at?->toDateString(),
+                        'verification_state' => 'USER_DECLARED_UNVERIFIED',
+                    ];
+                }
+            }
+
             $item = [
                 'sequence_number' => $seq++,
                 'priority' => DependencyGraph::CLASSIFICATION_PRIORITY[$res->legal_classification] ?? 99,
@@ -371,6 +387,8 @@ class RegistrationRoadmapGenerator
                 'authority' => [
                     'code' => $def?->authority?->code,
                     'name' => $def?->authority?->name,
+                    'category' => $def?->authority?->category,
+                    'portal_url' => $def?->authority?->portal_url,
                 ],
                 'legal_classification' => $res->legal_classification,
                 'applicability_decision' => $res->decision,
@@ -381,15 +399,19 @@ class RegistrationRoadmapGenerator
                 'evidence_requirements' => [
                     'required_documents' => $res->required_documents_snapshot ?? [],
                     'is_entity_level' => $def?->is_entity_level ?? true,
+                    'renewal_frequency' => $def?->renewal_frequency,
                 ],
                 'verification_status' => $rule?->verification_status ?? 'UNVERIFIED',
                 'applicable_rule_version' => $rule ? [
                     'id' => $rule->id,
                     'version_code' => $rule->version_code,
+                    'effective_from' => $rule->effective_from?->toDateString(),
+                    'effective_to' => $rule->effective_to?->toDateString(),
                     'status' => $rule->status,
+                    'verification_status' => $rule->verification_status,
                 ] : null,
                 'trigger_reasons' => $res->trigger_reasons ?? [],
-                'declared_registration' => null,
+                'declared_registration' => $declared,
                 'estimated_processing_days' => $def?->estimated_processing_days,
             ];
 
@@ -409,6 +431,7 @@ class RegistrationRoadmapGenerator
             'assessment_id' => $assessment->id,
             'tenant_id' => $assessment->tenant_id,
             'organisation_id' => $assessment->organisation_id,
+            'assessment_type' => $assessment->assessment_type,
             'assessed_at' => $assessment->generated_at->toIso8601String(),
             'summary' => [
                 'total_evaluated' => $results->count(),
@@ -425,5 +448,13 @@ class RegistrationRoadmapGenerator
             'unresolved' => $unresolved,
             'is_idempotent_replay' => $isIdempotentReplay,
         ];
+    }
+
+    /**
+     * Public helper to format any persisted assessment.
+     */
+    public function formatAssessment(ApplicabilityAssessment $assessment, bool $isIdempotentReplay = false): array
+    {
+        return $this->formatExistingAssessment($assessment, $isIdempotentReplay);
     }
 }

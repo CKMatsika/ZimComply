@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import AppLayout from '@/Layouts/AppLayout';
 import {
     Compass,
@@ -25,699 +25,1263 @@ import {
     Info,
     Check,
     AlertTriangle,
+    Plus,
+    Trash2,
+    RefreshCw,
+    Lock,
+    History,
+    Calendar,
+    ChevronDown,
+    ChevronUp,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/Components/UI/Card';
-import { Badge } from '@/Components/UI/Badge';
+import { Badge, BadgeVariant } from '@/Components/UI/Badge';
 import { Button } from '@/Components/UI/Button';
+import axios from 'axios';
+
+interface Authority {
+    code?: string;
+    name?: string;
+    category?: string;
+    portal_url?: string;
+}
+
+interface RuleVersionInfo {
+    id?: string;
+    version_code?: string;
+    effective_from?: string;
+    effective_to?: string;
+    status?: string;
+    verification_status?: string;
+}
+
+interface DeclaredRegistration {
+    declared_number?: string;
+    declared_date?: string;
+    verification_state?: string;
+}
+
+interface RoadmapItem {
+    sequence_number: number;
+    priority: number;
+    obligation_code: string;
+    title: string;
+    authority?: Authority;
+    legal_classification: string;
+    applicability_decision: string;
+    required_prerequisites: string[];
+    procedural_recommendations: string[];
+    missing_information: string[];
+    source_citation?: string;
+    evidence_requirements?: {
+        required_documents: string[];
+        is_entity_level: boolean;
+        renewal_frequency?: string;
+    };
+    verification_status: string;
+    applicable_rule_version?: RuleVersionInfo | null;
+    trigger_reasons: string[];
+    declared_registration?: DeclaredRegistration | null;
+    estimated_processing_days?: number;
+}
+
+interface AssessmentSummary {
+    total_evaluated: number;
+    mandatory_count: number;
+    conditional_count: number;
+    exempt_count: number;
+    not_applicable_count: number;
+    unverified_hold_count: number;
+    requires_information_count: number;
+}
+
+interface AssessmentData {
+    assessment_id: string;
+    tenant_id: string;
+    organisation_id: string;
+    assessment_type?: string;
+    assessed_at: string;
+    summary: AssessmentSummary;
+    roadmap: RoadmapItem[];
+    exemptions: any[];
+    not_applicable: any[];
+    unresolved: any[];
+    is_idempotent_replay?: boolean;
+}
+
+interface HistoricalAssessment {
+    id: string;
+    assessment_type: string;
+    generated_at: string;
+    formatted_date: string;
+    total_evaluated: number;
+    mandatory_count: number;
+    idempotency_key?: string;
+}
+
+interface QuestionnaireData {
+    id: string;
+    status: string;
+    current_step: number;
+    answers: Record<string, any>;
+    completed_at?: string;
+}
+
+interface BranchItem {
+    name: string;
+    jurisdiction_code: string;
+    city: string;
+    physical_address: string;
+    activities?: string;
+    is_headquarters?: boolean;
+}
 
 interface RegisterIndexProps {
     sectors: { code: string; name: string }[];
-    jurisdictions: { code: string; name: string }[];
+    jurisdictions: { code: string; name: string; province?: string; council_type?: string }[];
+    questionnaire?: QuestionnaireData | null;
+    latest_assessment?: AssessmentData | null;
+    assessment_history?: HistoricalAssessment[];
+    active_organisation?: {
+        id: string;
+        legal_name: string;
+        trading_name?: string;
+        entity_type: string;
+    } | null;
 }
 
-export default function RegisterIndex({ sectors, jurisdictions }: RegisterIndexProps) {
-    // Discovery flow state
-    const [currentStep, setCurrentStep] = useState<number>(1);
-    const [businessMode, setBusinessMode] = useState<'NEW' | 'EXISTING'>('EXISTING');
+export default function RegisterIndex({
+    sectors,
+    jurisdictions,
+    questionnaire,
+    latest_assessment,
+    assessment_history = [],
+    active_organisation,
+}: RegisterIndexProps) {
+    // Mode state: 'QUESTIONNAIRE' or 'ROADMAP'
+    const [viewMode, setViewMode] = useState<'QUESTIONNAIRE' | 'ROADMAP'>(
+        latest_assessment ? 'ROADMAP' : 'QUESTIONNAIRE'
+    );
 
-    // Step 1: Entity Structure
-    const [entityType, setEntityType] = useState('PRIVATE_LIMITED_COMPANY');
-    const [cobeRegistered, setCobeRegistered] = useState(true);
-    const [companyRegNumber, setCompanyRegNumber] = useState('COBE-2023-48192');
-    const [hasBpNumber, setHasBpNumber] = useState(true);
-    const [bpNumber, setBpNumber] = useState('BP-020038914');
+    // Active assessment being viewed
+    const [activeAssessment, setActiveAssessment] = useState<AssessmentData | null>(latest_assessment ?? null);
 
-    // Step 2: Revenue & Scale
-    const [selectedSector, setSelectedSector] = useState('ENGINEERING');
-    const [annualTurnover, setAnnualTurnover] = useState('OVER_25K'); // UNDER_25K, OVER_25K, OVER_100K
-    const [currencyMix, setCurrencyMix] = useState('USD_AND_ZIG');
+    // Roadmap active tab: 'ROADMAP' | 'EXEMPTIONS' | 'NOT_APPLICABLE' | 'HISTORY'
+    const [roadmapTab, setRoadmapTab] = useState<'ROADMAP' | 'EXEMPTIONS' | 'NOT_APPLICABLE' | 'HISTORY'>('ROADMAP');
 
-    // Step 3: Workforce & Payroll
-    const [headcount, setHeadcount] = useState('12');
-    const [hasEmployees, setHasEmployees] = useState(true);
-    const [hasNssaNumber, setHasNssaNumber] = useState(true);
-    const [nssaNumber, setNssaNumber] = useState('NSSA-ER-89412');
-    const [necIndustry, setNecIndustry] = useState('NEC_ENG');
+    // Stepper state (1-5)
+    const [currentStep, setCurrentStep] = useState<number>(
+        questionnaire?.current_step ? Math.min(5, Math.max(1, questionnaire.current_step)) : 1
+    );
 
-    // Step 4: Premises & Location
-    const [selectedJurisdiction, setSelectedJurisdiction] = useState('ZW-HARARE');
-    const [premisesType, setPremisesType] = useState('COMMERCIAL_WORKSHOP');
-    const [hasCouncilLicence, setHasCouncilLicence] = useState(false);
+    // Save and submission loading & error states
+    const [isSavingDraft, setIsSavingDraft] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [saveMessage, setSaveMessage] = useState<string | null>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-    // Step 5: Public Procurement & Industry
-    const [bidOnTenders, setBidOnTenders] = useState(true);
-    const [isEngineeringFirm, setIsEngineeringFirm] = useState(true);
-    const [joinCzi, setJoinCzi] = useState(false);
+    // Form Answers State initialized from saved questionnaire or defaults
+    const initialAnswers = questionnaire?.answers ?? {};
 
-    // Submission / review state
-    const [submitted, setSubmitted] = useState(false);
+    // STEP 1: Business Identity
+    const [businessMode, setBusinessMode] = useState<'NEW' | 'EXISTING'>(
+        initialAnswers.business_mode ?? (initialAnswers.is_already_incorporated ? 'EXISTING' : 'NEW')
+    );
+    const [entityType, setEntityType] = useState<string>(
+        initialAnswers.entity_type ?? active_organisation?.entity_type ?? 'PRIVATE_LIMITED_COMPANY'
+    );
+    const [registeredName, setRegisteredName] = useState<string>(
+        initialAnswers.registered_name ?? active_organisation?.legal_name ?? ''
+    );
+    const [tradingName, setTradingName] = useState<string>(
+        initialAnswers.trading_name ?? active_organisation?.trading_name ?? ''
+    );
+    const [isAlreadyIncorporated, setIsAlreadyIncorporated] = useState<boolean>(
+        Boolean(initialAnswers.is_already_incorporated ?? (businessMode === 'EXISTING'))
+    );
+    const [companyRegNumber, setCompanyRegNumber] = useState<string>(
+        initialAnswers.company_registration_number ?? ''
+    );
+    const [incorporationDate, setIncorporationDate] = useState<string>(
+        initialAnswers.incorporation_date ?? ''
+    );
+    const [bpNumber, setBpNumber] = useState<string>(
+        initialAnswers.bp_number ?? ''
+    );
 
-    const steps = [
-        { number: 1, title: 'Entity Structure', desc: 'Legal personality & incorporation' },
-        { number: 2, title: 'Operations & Turnover', desc: 'Sector & VAT threshold' },
-        { number: 3, title: 'Workforce & Payroll', desc: 'NSSA, ZIMDEF & NEC coverage' },
-        { number: 4, title: 'Premises & Location', desc: 'Local authority licensing' },
-        { number: 5, title: 'Procurement & Professional', desc: 'PRAZ tenders & council licences' },
-    ];
+    // STEP 2: Activities & Scale
+    const [industrySector, setIndustrySector] = useState<string>(
+        initialAnswers.industry_sector ?? 'ENGINEERING'
+    );
+    const [secondaryActivities, setSecondaryActivities] = useState<string[]>(
+        Array.isArray(initialAnswers.secondary_activities) ? initialAnswers.secondary_activities : []
+    );
+    const [goodsAndServices, setGoodsAndServices] = useState<string>(
+        initialAnswers.goods_and_services ?? ''
+    );
+    const [licensedProfessionInvolved, setLicensedProfessionInvolved] = useState<boolean>(
+        Boolean(initialAnswers.licensed_profession_involved)
+    );
+    const [annualTurnoverUsd, setAnnualTurnoverUsd] = useState<string>(
+        initialAnswers.annual_turnover_usd ? String(initialAnswers.annual_turnover_usd) : '45000'
+    );
+    const [turnoverCurrency, setTurnoverCurrency] = useState<'USD' | 'ZIG'>(
+        initialAnswers.turnover_currency ?? 'USD'
+    );
+    const [wantsVoluntaryVat, setWantsVoluntaryVat] = useState<boolean>(
+        Boolean(initialAnswers.wants_voluntary_vat)
+    );
+    const [hasVatRegistration, setHasVatRegistration] = useState<boolean>(
+        Boolean(initialAnswers.has_vat_registration || initialAnswers.vat_number)
+    );
+    const [vatRegistrationNumber, setVatRegistrationNumber] = useState<string>(
+        initialAnswers.vat_registration_number ?? initialAnswers.vat_number ?? ''
+    );
+    const [hasItf263, setHasItf263] = useState<boolean>(
+        Boolean(initialAnswers.has_itf263)
+    );
 
-    // Compute deterministic roadmap based on user inputs
-    const generateRoadmap = () => {
-        const items = [];
+    // STEP 3: Workforce & Payroll
+    const [employeeCount, setEmployeeCount] = useState<string>(
+        initialAnswers.employee_count !== undefined ? String(initialAnswers.employee_count) : '6'
+    );
+    const [hasEmployees, setHasEmployees] = useState<boolean>(
+        initialAnswers.has_employees !== undefined ? Boolean(initialAnswers.has_employees) : true
+    );
+    const [employeeCategories, setEmployeeCategories] = useState<string[]>(
+        Array.isArray(initialAnswers.employee_categories)
+            ? initialAnswers.employee_categories
+            : ['TECHNICAL_SKILLED', 'CLERICAL']
+    );
+    const [paysWages, setPaysWages] = useState<boolean>(
+        initialAnswers.pays_wages !== undefined ? Boolean(initialAnswers.pays_wages) : true
+    );
+    const [grossMonthlyWageBill, setGrossMonthlyWageBill] = useState<string>(
+        initialAnswers.gross_monthly_wage_bill_usd ? String(initialAnswers.gross_monthly_wage_bill_usd) : '3500'
+    );
+    const [hasNssaRegistration, setHasNssaRegistration] = useState<boolean>(
+        Boolean(initialAnswers.has_nssa_registration || initialAnswers.nssa_employer_number)
+    );
+    const [nssaEmployerNumber, setNssaEmployerNumber] = useState<string>(
+        initialAnswers.nssa_employer_number ?? initialAnswers.nssa_number ?? ''
+    );
+    const [necIndustry, setNecIndustry] = useState<string>(
+        initialAnswers.nec_industry ?? (industrySector === 'ENGINEERING' ? 'NEC_ENG' : 'NEC_COMM')
+    );
+    const [hasNecRegistration, setHasNecRegistration] = useState<boolean>(
+        Boolean(initialAnswers.has_nec_registration || initialAnswers.nec_registration_number)
+    );
+    const [necRegistrationNumber, setNecRegistrationNumber] = useState<string>(
+        initialAnswers.nec_registration_number ?? ''
+    );
+    const [isExemptDiplomaticOrReligious, setIsExemptDiplomaticOrReligious] = useState<boolean>(
+        Boolean(initialAnswers.is_exempt_diplomatic_or_religious)
+    );
 
-        // 1. DCIP / COBE
-        if (cobeRegistered) {
-            items.push({
-                authority: 'DCIP',
-                name: 'Company Incorporation & Constitution',
-                citation: 'Companies and Other Business Entities Act [Chapter 24:31]',
-                type: 'MANDATORY_STATUTORY',
-                status: 'USER_DECLARED',
-                statusLabel: 'Declared Active (Reg No: ' + (companyRegNumber || 'COBE-XXXX') + ')',
-                statusVariant: 'success' as const,
-                cost: 'Statutory Stamp Duties Paid',
-                timeline: 'Completed',
-                prereqs: 'None',
-                evidenceNeeded: 'Official Certificate of Incorporation + CR6/CR14',
-            });
+    // STEP 4: Premises & Jurisdictions
+    const [hasPhysicalPremises, setHasPhysicalPremises] = useState<boolean>(
+        initialAnswers.has_physical_premises !== undefined ? Boolean(initialAnswers.has_physical_premises) : true
+    );
+    const [premisesType, setPremisesType] = useState<string>(
+        initialAnswers.premises_type ?? 'INDUSTRIAL_WORKSHOP'
+    );
+    const [jurisdictionCode, setJurisdictionCode] = useState<string>(
+        initialAnswers.jurisdiction_code ?? 'ZW-HARARE'
+    );
+    const [physicalAddress, setPhysicalAddress] = useState<string>(
+        initialAnswers.physical_address ?? '14 Kelvin Road North, Graniteside, Harare'
+    );
+    const [branches, setBranches] = useState<BranchItem[]>(
+        Array.isArray(initialAnswers.branches) ? initialAnswers.branches : []
+    );
+    const [hasCouncilLicence, setHasCouncilLicence] = useState<boolean>(
+        Boolean(initialAnswers.has_council_licence || initialAnswers.council_licence_number)
+    );
+    const [councilLicenceNumber, setCouncilLicenceNumber] = useState<string>(
+        initialAnswers.council_licence_number ?? ''
+    );
+
+    // STEP 5: Procurement & Review
+    const [bidsOnGovernmentTenders, setBidsOnGovernmentTenders] = useState<boolean>(
+        Boolean(initialAnswers.bids_on_government_tenders ?? initialAnswers.bid_on_tenders)
+    );
+    const [hasPrazRegistration, setHasPrazRegistration] = useState<boolean>(
+        Boolean(initialAnswers.has_praz_registration || initialAnswers.praz_supplier_number)
+    );
+    const [prazSupplierNumber, setPrazSupplierNumber] = useState<string>(
+        initialAnswers.praz_supplier_number ?? ''
+    );
+    const [tenderCategories, setTenderCategories] = useState<string[]>(
+        Array.isArray(initialAnswers.tender_categories) ? initialAnswers.tender_categories : ['GOODS', 'SERVICES']
+    );
+    const [wantsCziMembership, setWantsCziMembership] = useState<boolean>(
+        Boolean(initialAnswers.wants_czi_membership ?? initialAnswers.join_czi)
+    );
+    const [confirmationAccurate, setConfirmationAccurate] = useState<boolean>(false);
+
+    // Sync businessMode and isAlreadyIncorporated
+    useEffect(() => {
+        if (businessMode === 'NEW') {
+            setIsAlreadyIncorporated(false);
+            setCompanyRegNumber('');
         } else {
-            items.push({
-                authority: 'DCIP',
-                name: 'Incorporate Company under COBE Act',
-                citation: 'Companies and Other Business Entities Act [Chapter 24:31]',
-                type: 'MANDATORY_STATUTORY',
-                status: 'ACTION_REQUIRED',
-                statusLabel: 'Mandatory Initial Step',
-                statusVariant: 'danger' as const,
-                cost: 'Approx. $50 - $120 USD (Registrar filing fees)',
-                timeline: '3 - 5 Working Days',
-                prereqs: 'Name Search & Reservation',
-                evidenceNeeded: 'Incorporation Certificate & Registered Memorandum',
-            });
+            setIsAlreadyIncorporated(true);
         }
+    }, [businessMode]);
 
-        // 2. ZIMRA BP Number
-        items.push({
-            authority: 'ZIMRA',
-            name: 'ZIMRA Business Partner (BP) Tax Number Registration',
-            citation: 'Income Tax Act [Chapter 23:06] Section 61',
-            type: 'MANDATORY_STATUTORY',
-            status: hasBpNumber ? 'USER_DECLARED' : 'ACTION_REQUIRED',
-            statusLabel: hasBpNumber ? 'Declared Active (' + bpNumber + ')' : 'Mandatory within 30 days',
-            statusVariant: hasBpNumber ? 'success' as const : 'danger' as const,
-            cost: 'Free (Statutory Registration)',
-            timeline: '1 - 3 Working Days',
-            prereqs: 'Certificate of Incorporation & CR14/CR6',
-            evidenceNeeded: 'Official ZIMRA Business Partner Confirmation Notice',
-        });
+    // Construct the answers payload object
+    const collectAnswers = () => ({
+        // Step 1
+        business_mode: businessMode,
+        entity_type: entityType,
+        registered_name: registeredName,
+        trading_name: tradingName,
+        is_already_incorporated: isAlreadyIncorporated,
+        company_registration_number: isAlreadyIncorporated ? companyRegNumber : null,
+        incorporation_date: isAlreadyIncorporated ? incorporationDate : null,
+        bp_number: bpNumber || null,
 
-        // 3. ZIMRA VAT Registration (Conditional)
-        if (annualTurnover !== 'UNDER_25K') {
-            items.push({
-                authority: 'ZIMRA',
-                name: 'Compulsory VAT Registration (SI 41 of 2024)',
-                citation: 'Value Added Tax Act [Chapter 23:12] Section 23; SI 41/2024',
-                type: 'CONDITIONAL_STATUTORY',
-                status: 'ACTION_REQUIRED',
-                statusLabel: 'Mandatory: Turnover >= US$25k',
-                statusVariant: 'warning' as const,
-                cost: 'Free (Statutory Registration)',
-                timeline: '5 - 10 Working Days',
-                prereqs: 'Active BP Number & Verifiable Turnover Invoices',
-                evidenceNeeded: 'ZIMRA VAT Certificate & Fiscalised Electronic Invoicing Setup',
-            });
-        } else {
-            items.push({
-                authority: 'ZIMRA',
-                name: 'VAT Registration (Voluntary Option)',
-                citation: 'Value Added Tax Act [Chapter 23:12] Section 23(3)',
-                type: 'CONDITIONAL_STATUTORY',
-                status: 'EXEMPT',
-                statusLabel: 'Exempt: Turnover < US$25,000 threshold',
-                statusVariant: 'neutral' as const,
-                cost: 'Optional',
-                timeline: 'N/A',
-                prereqs: 'Proper Books of Accounts',
-                evidenceNeeded: 'Optional application if supplying zero-rated goods',
-            });
+        // Step 2
+        industry_sector: industrySector,
+        secondary_activities: secondaryActivities,
+        goods_and_services: goodsAndServices,
+        licensed_profession_involved: licensedProfessionInvolved,
+        annual_turnover_usd: parseFloat(annualTurnoverUsd) || 0,
+        turnover_currency: turnoverCurrency,
+        wants_voluntary_vat: wantsVoluntaryVat,
+        has_vat_registration: hasVatRegistration,
+        vat_registration_number: hasVatRegistration ? vatRegistrationNumber : null,
+        has_itf263: hasItf263,
+
+        // Step 3
+        employee_count: parseInt(employeeCount, 10) || 0,
+        has_employees: parseInt(employeeCount, 10) > 0,
+        employee_categories: employeeCategories,
+        pays_wages: paysWages,
+        gross_monthly_wage_bill_usd: paysWages ? (parseFloat(grossMonthlyWageBill) || 0) : null,
+        has_nssa_registration: hasNssaRegistration,
+        nssa_employer_number: hasNssaRegistration ? nssaEmployerNumber : null,
+        nec_industry: necIndustry,
+        has_nec_registration: hasNecRegistration,
+        nec_registration_number: hasNecRegistration ? necRegistrationNumber : null,
+        is_exempt_diplomatic_or_religious: isExemptDiplomaticOrReligious,
+
+        // Step 4
+        has_physical_premises: hasPhysicalPremises,
+        premises_type: premisesType,
+        jurisdiction_code: jurisdictionCode,
+        physical_address: physicalAddress,
+        branches: branches,
+        has_council_licence: hasCouncilLicence,
+        council_licence_number: hasCouncilLicence ? councilLicenceNumber : null,
+
+        // Step 5
+        bids_on_government_tenders: bidsOnGovernmentTenders,
+        has_praz_registration: hasPrazRegistration,
+        praz_supplier_number: hasPrazRegistration ? prazSupplierNumber : null,
+        tender_categories: tenderCategories,
+        wants_czi_membership: wantsCziMembership,
+        confirmation_accurate: confirmationAccurate,
+    });
+
+    // Save Draft to PostgreSQL
+    const handleSaveDraft = async (targetStep?: number) => {
+        setIsSavingDraft(true);
+        setSaveMessage(null);
+        setErrorMessage(null);
+
+        try {
+            const stepToSave = targetStep ?? currentStep;
+            const payload = {
+                current_step: stepToSave,
+                answers: collectAnswers(),
+            };
+
+            const response = await axios.post('/registration/questionnaire/save', payload);
+
+            if (response.data.success) {
+                const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                setSaveMessage(`Draft saved at ${now}`);
+                setTimeout(() => setSaveMessage(null), 4000);
+            }
+        } catch (err: any) {
+            setErrorMessage(err.response?.data?.message || err.response?.data?.error || 'Failed to save draft.');
+        } finally {
+            setIsSavingDraft(false);
         }
-
-        // 4. ZIMRA ITF263 Tax Clearance
-        items.push({
-            authority: 'ZIMRA',
-            name: 'ITF263 Tax Clearance Certificate',
-            citation: 'Income Tax Act [Chapter 23:06] Section 80',
-            type: 'CONDITIONAL_STATUTORY',
-            status: 'ACTION_REQUIRED',
-            statusLabel: 'Critical: Prevents 30% Withholding Tax',
-            statusVariant: 'warning' as const,
-            cost: 'Free (Requires tax return compliance)',
-            timeline: 'Instant to 48 Hours',
-            prereqs: 'Up-to-date Income Tax, PAYE & VAT filings',
-            evidenceNeeded: 'Electronic ITF263 Certificate with verifiable QR Code',
-        });
-
-        // 5. NSSA Employer Registration
-        if (parseInt(headcount) > 0) {
-            items.push({
-                authority: 'NSSA',
-                name: 'NSSA Employer Registration (POBS & APWCS Schemes)',
-                citation: 'NSSA Act [Chapter 17:04]; SI 393/1993 & SI 68/1990',
-                type: 'CONDITIONAL_STATUTORY',
-                status: hasNssaNumber ? 'USER_DECLARED' : 'ACTION_REQUIRED',
-                statusLabel: hasNssaNumber ? 'Declared Active (' + nssaNumber + ')' : 'Mandatory for employers',
-                statusVariant: hasNssaNumber ? 'success' as const : 'danger' as const,
-                cost: 'Free (Monthly 4.5% + 4.5% contributions upon payroll)',
-                timeline: '3 - 5 Working Days',
-                prereqs: 'ZIMRA BP Number & Director IDs',
-                evidenceNeeded: 'NSSA Employer Registration Certificate (Form P3)',
-            });
-
-            // 6. ZIMDEF Levy
-            items.push({
-                authority: 'ZIMDEF',
-                name: 'ZIMDEF 1% Manpower Training Levy Registration',
-                citation: 'Manpower Planning and Development Act [Chapter 28:02] Section 53',
-                type: 'CONDITIONAL_STATUTORY',
-                status: 'ACTION_REQUIRED',
-                statusLabel: 'Mandatory: 1% of Gross Wage Bill',
-                statusVariant: 'warning' as const,
-                cost: '1% of Gross Wages payable monthly',
-                timeline: '3 Working Days',
-                prereqs: 'NSSA Employer Code & Active Payroll',
-                evidenceNeeded: 'ZIMDEF Employer Assessment Record',
-            });
-
-            // 7. Sector NEC
-            items.push({
-                authority: 'SECTOR_NEC',
-                name: selectedSector === 'ENGINEERING' ? 'NEC for Engineering, Iron & Steel Registration' : 'NEC for Commercial Sectors Registration',
-                citation: 'Labour Act [Chapter 28:01] & Gazetted Sector Collective Bargaining Agreement',
-                type: 'CBA_COLLECTIVE_AGREEMENT',
-                status: 'ACTION_REQUIRED',
-                statusLabel: 'Mandatory Collective Bargaining Agreement',
-                statusVariant: 'warning' as const,
-                cost: 'Employee & Employer split council dues',
-                timeline: '5 - 7 Working Days',
-                prereqs: 'NSSA Employer Registration & Wage Grade Sheet',
-                evidenceNeeded: 'Official NEC Certificate of Registration',
-            });
-        }
-
-        // 8. Municipal Operating Licence
-        items.push({
-            authority: 'LOCAL_AUTHORITY',
-            name: `${selectedJurisdiction === 'ZW-HARARE' ? 'City of Harare' : 'Municipal'} Commercial Operating Licence`,
-            citation: 'Urban Councils Act [Chapter 29:15] Section 229; Shop Licences Act [Chapter 14:17]',
-            type: 'CONDITIONAL_STATUTORY',
-            status: hasCouncilLicence ? 'USER_DECLARED' : 'ACTION_REQUIRED',
-            statusLabel: hasCouncilLicence ? 'Declared Active' : 'Required for Physical Premises',
-            statusVariant: hasCouncilLicence ? 'success' as const : 'warning' as const,
-            cost: 'Approx. $300 - $800 USD/year (Varies by floor area & zoning)',
-            timeline: '14 - 21 Working Days',
-            prereqs: 'City Health Inspection, Fire Clearance, Commercial Lease Agreement',
-            evidenceNeeded: 'Current Year Municipal Operating Licence Certificate / Disc',
-        });
-
-        // 9. PRAZ Supplier Registration (Tender Specific)
-        if (bidOnTenders) {
-            items.push({
-                authority: 'PRAZ',
-                name: 'PRAZ Supplier Registry Accreditation (e-GP Platform)',
-                citation: 'Public Procurement and Disposal of Public Assets Act [Chapter 22:23]',
-                type: 'TENDER_SPECIFIC',
-                status: 'ACTION_REQUIRED',
-                statusLabel: 'Mandatory for Public Tenders',
-                statusVariant: 'info' as const,
-                cost: 'Approx. $120 - $250 USD per category / calendar year',
-                timeline: '2 - 3 Working Days (Online via PRAZ e-GP portal)',
-                prereqs: 'Valid ZIMRA ITF263, NSSA Clearance, Certificate of Incorporation',
-                evidenceNeeded: 'Official Annual PRAZ Supplier Registration Certificate',
-            });
-        }
-
-        // 10. Engineering Council (Professional regulation)
-        if (isEngineeringFirm && selectedSector === 'ENGINEERING') {
-            items.push({
-                authority: 'PROFESSIONAL_COUNCIL',
-                name: 'Engineering Council of Zimbabwe (ECZ) Firm Practising Licence',
-                citation: 'Engineering Council Act [Chapter 27:22]',
-                type: 'PROFESSIONAL_REGULATION',
-                status: 'ACTION_REQUIRED',
-                statusLabel: 'Mandatory for Consulting Engineering',
-                statusVariant: 'warning' as const,
-                cost: 'Annual Corporate Practising Assessment',
-                timeline: '10 - 14 Working Days',
-                prereqs: 'Registered PrEng / TechEng Director Credentials',
-                evidenceNeeded: 'Valid ECZ Corporate Practising Certificate',
-            });
-        }
-
-        // 11. Voluntary Industry Body
-        if (joinCzi) {
-            items.push({
-                authority: 'INDUSTRY_ASSOCIATION',
-                name: 'Confederation of Zimbabwe Industries (CZI) Membership',
-                citation: 'Private Industry Body Constitution',
-                type: 'OPTIONAL_ASSOCIATION',
-                status: 'OPTIONAL',
-                statusLabel: 'Voluntary Association',
-                statusVariant: 'neutral' as const,
-                cost: 'Annual Association Subscription Fee',
-                timeline: '7 Working Days',
-                prereqs: 'Commercial Operation in Manufacturing or Industrial Sector',
-                evidenceNeeded: 'CZI Membership Certificate',
-            });
-        }
-
-        return items;
     };
 
-    const roadmapItems = generateRoadmap();
+    // Final Submission & Deterministic Assessment Generation
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+
+        if (!confirmationAccurate) {
+            setErrorMessage('Please confirm accuracy declaration before generating statutory assessment.');
+            return;
+        }
+
+        setIsSubmitting(true);
+        setErrorMessage(null);
+
+        try {
+            const payload = {
+                answers: collectAnswers(),
+            };
+
+            const response = await axios.post('/registration/questionnaire/submit', payload);
+
+            if (response.data.success && response.data.assessment) {
+                setActiveAssessment(response.data.assessment);
+                setViewMode('ROADMAP');
+                setRoadmapTab('ROADMAP');
+            }
+        } catch (err: any) {
+            if (err.response?.status === 422 && err.response?.data?.errors) {
+                const errors = Object.values(err.response.data.errors).flat();
+                setErrorMessage(errors.join(' '));
+            } else {
+                setErrorMessage(err.response?.data?.message || err.response?.data?.error || 'Failed to submit questionnaire.');
+            }
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // Reassessment
+    const handleReassess = async () => {
+        setIsSubmitting(true);
+        setErrorMessage(null);
+
+        try {
+            const payload = {
+                answers: collectAnswers(),
+            };
+
+            const response = await axios.post('/registration/reassess', payload);
+
+            if (response.data.success && response.data.assessment) {
+                setActiveAssessment(response.data.assessment);
+                setViewMode('ROADMAP');
+                setRoadmapTab('ROADMAP');
+            }
+        } catch (err: any) {
+            setErrorMessage(err.response?.data?.message || err.response?.data?.error || 'Failed to generate reassessment.');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // Load a historical snapshot
+    const handleLoadHistorical = async (assessmentId: string) => {
+        try {
+            const res = await axios.get(`/registration/assessments/${assessmentId}`);
+            if (res.data.success && res.data.assessment) {
+                setActiveAssessment(res.data.assessment);
+                setRoadmapTab('ROADMAP');
+            }
+        } catch (err: any) {
+            setErrorMessage('Failed to load historical assessment.');
+        }
+    };
+
+    // Branch management helpers
+    const addBranch = () => {
+        setBranches([
+            ...branches,
+            {
+                name: `Branch #${branches.length + 1}`,
+                jurisdiction_code: 'ZW-BULAWAYO',
+                city: 'Bulawayo',
+                physical_address: '',
+                activities: 'Retail & Distribution',
+            },
+        ]);
+    };
+
+    const updateBranch = (index: number, field: keyof BranchItem, value: any) => {
+        const updated = [...branches];
+        updated[index] = { ...updated[index], [field]: value };
+        setBranches(updated);
+    };
+
+    const removeBranch = (index: number) => {
+        setBranches(branches.filter((_, i) => i !== index));
+    };
+
+    const steps = [
+        { number: 1, title: 'Entity Identity', desc: 'Structure & incorporation' },
+        { number: 2, title: 'Activities & Scale', desc: 'Sector, VAT & revenue' },
+        { number: 3, title: 'Workforce & Payroll', desc: 'NSSA, ZIMDEF & NEC' },
+        { number: 4, title: 'Premises & Branches', desc: 'Local council licences' },
+        { number: 5, title: 'Procurement & Review', desc: 'PRAZ tenders & confirmation' },
+    ];
+
+    const turnoverNumber = parseFloat(annualTurnoverUsd) || 0;
+    const isVatThresholdExceeded = turnoverNumber >= 25000;
+
+    // Helper for Decision Badge variant
+    const getDecisionBadge = (decision: string) => {
+        switch (decision) {
+            case 'MANDATORY':
+                return <Badge variant="danger" size="sm" dot>MANDATORY</Badge>;
+            case 'CONDITIONAL':
+                return <Badge variant="warning" size="sm" dot>CONDITIONAL</Badge>;
+            case 'EXEMPT':
+                return <Badge variant="success" size="sm" dot>EXEMPT</Badge>;
+            case 'NOT_APPLICABLE':
+                return <Badge variant="neutral" size="sm">NOT APPLICABLE</Badge>;
+            case 'UNVERIFIED_HOLD':
+                return <Badge variant="warning" size="sm" dot>UNVERIFIED HOLD</Badge>;
+            case 'REQUIRES_INFORMATION':
+                return <Badge variant="info" size="sm" dot>REQUIRES INFO</Badge>;
+            default:
+                return <Badge variant="neutral" size="sm">{decision}</Badge>;
+        }
+    };
 
     return (
         <AppLayout
-            title="Business Discovery & Statutory Roadmap"
-            subtitle="Determine exact statutory obligations, collective bargaining agreements, and licensing requirements under Zimbabwean law."
+            title="Registration Engine"
+            subtitle="Zimbabwe Statutory Discovery & Deterministic Registration Roadmap"
         >
-            <div className="space-y-6">
-                {/* Mode Selector & Introductory Context */}
-                <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
-                    <div className="space-y-1">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-[#19766F] flex items-center gap-1.5">
-                            <Scale className="h-3.5 w-3.5" />
-                            <span>Statutory Discovery Engine</span>
+            <div className="space-y-6 max-w-7xl mx-auto pb-12">
+                {/* Header Card */}
+                <div className="bg-[#14263D] text-white p-6 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+                    <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-teal-400 animate-pulse" />
+                            <span className="text-xs font-semibold tracking-wider uppercase text-teal-300">
+                                Zimbabwe Statutory Engine • Milestone 2.3
+                            </span>
                         </div>
-                        <h2 className="text-base font-heading font-bold text-slate-900">
-                            {businessMode === 'NEW' ? 'Initial Business Registration Roadmap' : 'Existing Business Statutory Audit & Gap Analysis'}
-                        </h2>
-                        <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
-                            {businessMode === 'NEW'
-                                ? 'Evaluate mandatory formation steps, initial tax registration, social security, and municipal premises permits.'
-                                : 'Audit current compliance posture, identify outstanding regulatory renewals, declare existing certificates, and map tender eligibility.'}
+                        <h1 className="font-heading font-extrabold text-2xl text-white">
+                            Business Discovery & Regulatory Roadmap
+                        </h1>
+                        <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                            Deterministic regulatory assessment across CIPZ, ZIMRA, NSSA, ZIMDEF, PRAZ, City of Harare, and National Employment Councils.
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg shrink-0">
-                        <button
-                            type="button"
-                            onClick={() => { setBusinessMode('EXISTING'); setSubmitted(false); }}
-                            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                                businessMode === 'EXISTING'
-                                    ? 'bg-white text-slate-900 shadow-2xs'
-                                    : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                        >
-                            Existing Business Audit
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => { setBusinessMode('NEW'); setSubmitted(false); }}
-                            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                                businessMode === 'NEW'
-                                    ? 'bg-white text-slate-900 shadow-2xs'
-                                    : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                        >
-                            New Business Setup
-                        </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                        {viewMode === 'ROADMAP' ? (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setViewMode('QUESTIONNAIRE')}
+                                icon={<RotateCcw className="h-3.5 w-3.5" />}
+                                className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20"
+                            >
+                                Edit Circumstances & Reassess
+                            </Button>
+                        ) : activeAssessment ? (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setViewMode('ROADMAP')}
+                                icon={<Layers className="h-3.5 w-3.5" />}
+                                className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20"
+                            >
+                                View Current Roadmap
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
 
-                {/* Step Navigation Bar */}
-                {!submitted && (
-                    <div className="bg-white border border-slate-200 rounded-xl p-3 sm:p-4 shadow-2xs overflow-x-auto">
-                        <div className="flex items-center justify-between min-w-[640px] gap-2">
-                            {steps.map((st) => (
-                                <button
-                                    key={st.number}
-                                    type="button"
-                                    onClick={() => setCurrentStep(st.number)}
-                                    className={`flex-1 flex items-center gap-3 p-2 rounded-lg text-left transition-colors ${
-                                        currentStep === st.number
-                                            ? 'bg-[#e2f4f2] text-[#125752] border border-[#a5dcd6]'
-                                            : currentStep > st.number
-                                            ? 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                                            : 'text-slate-400 hover:text-slate-600'
-                                    }`}
-                                >
-                                    <div
-                                        className={`h-7 w-7 rounded-md flex items-center justify-center font-bold text-xs shrink-0 ${
-                                            currentStep === st.number
-                                                ? 'bg-[#19766F] text-white'
-                                                : currentStep > st.number
-                                                ? 'bg-emerald-600 text-white'
-                                                : 'bg-slate-200 text-slate-600'
-                                        }`}
-                                    >
-                                        {currentStep > st.number ? <Check className="h-4 w-4" /> : st.number}
-                                    </div>
-                                    <div className="truncate">
-                                        <div className="text-xs font-bold truncate">{st.title}</div>
-                                        <div className="text-[10px] text-slate-500 truncate hidden sm:block">{st.desc}</div>
-                                    </div>
-                                </button>
-                            ))}
+                {/* Notifications & Error Banners */}
+                {errorMessage && (
+                    <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-start gap-3 text-xs">
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                            <span className="font-bold">Validation Notice:</span>
+                            <p>{errorMessage}</p>
                         </div>
                     </div>
                 )}
 
-                {/* Discovery Form Steps */}
-                {!submitted ? (
+                {saveMessage && (
+                    <div className="p-3 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 flex items-center gap-2 text-xs">
+                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+                        <span>{saveMessage}</span>
+                    </div>
+                )}
+
+                {viewMode === 'QUESTIONNAIRE' ? (
+                    /* ------------------------------------------------------------- */
+                    /* 5-STEP QUESTIONNAIRE WIZARD (Phase B & C)                     */
+                    /* ------------------------------------------------------------- */
                     <Card>
-                        <CardHeader>
-                            <div>
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                                    Step {currentStep} of 5
-                                </span>
-                                <CardTitle className="text-base mt-0.5">
-                                    {steps[currentStep - 1].title}
-                                </CardTitle>
-                                <CardDescription>
-                                    {steps[currentStep - 1].desc}
-                                </CardDescription>
+                        {/* Stepper Progress Bar */}
+                        <div className="border-b border-slate-100 bg-slate-50/70 p-4 sm:p-5 rounded-t-xl">
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                                {steps.map((step) => {
+                                    const isDone = currentStep > step.number;
+                                    const isCurrent = currentStep === step.number;
+                                    return (
+                                        <button
+                                            key={step.number}
+                                            type="button"
+                                            onClick={() => {
+                                                handleSaveDraft(step.number);
+                                                setCurrentStep(step.number);
+                                            }}
+                                            className={`text-left p-2.5 rounded-lg border transition-all ${
+                                                isCurrent
+                                                    ? 'bg-white border-[#19766F] shadow-xs ring-1 ring-[#19766F]'
+                                                    : isDone
+                                                    ? 'bg-emerald-50/70 border-emerald-200 hover:bg-emerald-50'
+                                                    : 'bg-white/80 border-slate-200 hover:bg-white'
+                                            }`}
+                                        >
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span
+                                                    className={`text-[10px] font-bold uppercase tracking-wider ${
+                                                        isCurrent
+                                                            ? 'text-[#19766F]'
+                                                            : isDone
+                                                            ? 'text-emerald-700'
+                                                            : 'text-slate-500'
+                                                    }`}
+                                                >
+                                                    Step {step.number}
+                                                </span>
+                                                {isDone && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                                            </div>
+                                            <div className="font-heading text-xs font-bold text-slate-800 truncate">
+                                                {step.title}
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 truncate hidden sm:block">
+                                                {step.desc}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
                             </div>
-                        </CardHeader>
+                        </div>
 
-                        <CardContent className="space-y-6">
-                            {/* STEP 1: Entity Structure */}
+                        <CardContent className="p-6 space-y-6">
+                            {/* STEP 1: BUSINESS IDENTITY */}
                             {currentStep === 1 && (
-                                <div className="space-y-5">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Legal Entity Form
-                                            </label>
-                                            <select
-                                                value={entityType}
-                                                onChange={(e) => setEntityType(e.target.value)}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
-                                            >
-                                                <option value="PRIVATE_LIMITED_COMPANY">Private Limited Company (PLC / Ltd)</option>
-                                                <option value="PRIVATE_BUSINESS_CORPORATION">Private Business Corporation (PBC)</option>
-                                                <option value="REGISTERED_TRUST">Registered Deed of Trust</option>
-                                                <option value="PARTNERSHIP">Commercial Partnership</option>
-                                                <option value="FOREIGN_BRANCH">Foreign Company Branch (Part XXIII)</option>
-                                            </select>
-                                            <p className="text-[11px] text-slate-500 mt-1">
-                                                Governed by the Companies and Other Business Entities Act [Chapter 24:31].
-                                            </p>
-                                        </div>
+                                <div className="space-y-6">
+                                    <div className="border-b border-slate-100 pb-3">
+                                        <h2 className="text-base font-bold text-slate-900 font-heading">
+                                            Step 1: Business Identity & Legal Structure
+                                        </h2>
+                                        <p className="text-xs text-slate-500">
+                                            Specify business lifecycle status, legal personality under the Companies and Other Business Entities Act [Chapter 24:31], and registration identifiers.
+                                        </p>
+                                    </div>
 
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Incorporation Status (Companies Registry)
-                                            </label>
-                                            <div className="space-y-2">
-                                                <label className="flex items-center gap-2 text-xs text-slate-800 cursor-pointer">
-                                                    <input
-                                                        type="radio"
-                                                        name="cobe_status"
-                                                        checked={cobeRegistered}
-                                                        onChange={() => setCobeRegistered(true)}
-                                                        className="text-[#19766F] focus:ring-[#19766F]"
-                                                    />
-                                                    <span>Already incorporated with Certificate of Incorporation & CR14/CR6</span>
-                                                </label>
-                                                <label className="flex items-center gap-2 text-xs text-slate-800 cursor-pointer">
-                                                    <input
-                                                        type="radio"
-                                                        name="cobe_status"
-                                                        checked={!cobeRegistered}
-                                                        onChange={() => setCobeRegistered(false)}
-                                                        className="text-[#19766F] focus:ring-[#19766F]"
-                                                    />
-                                                    <span>Not yet incorporated (Requires initial name search & registration)</span>
-                                                </label>
+                                    {/* Business Mode Toggle */}
+                                    <div className="space-y-2">
+                                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                                            Business Formation Mode
+                                        </label>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div
+                                                onClick={() => setBusinessMode('NEW')}
+                                                className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                                                    businessMode === 'NEW'
+                                                        ? 'bg-teal-50/60 border-[#19766F] ring-1 ring-[#19766F]'
+                                                        : 'bg-white border-slate-200 hover:border-slate-300'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <Compass className="w-4 h-4 text-[#19766F]" />
+                                                    <span className="font-bold text-sm text-slate-900">New Business Formation</span>
+                                                </div>
+                                                <p className="text-xs text-slate-500">
+                                                    Entity not yet incorporated with CIPZ. Roadmap will sequence foundational company incorporation first.
+                                                </p>
+                                            </div>
+
+                                            <div
+                                                onClick={() => setBusinessMode('EXISTING')}
+                                                className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                                                    businessMode === 'EXISTING'
+                                                        ? 'bg-teal-50/60 border-[#19766F] ring-1 ring-[#19766F]'
+                                                        : 'bg-white border-slate-200 hover:border-slate-300'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <Building2 className="w-4 h-4 text-[#19766F]" />
+                                                    <span className="font-bold text-sm text-slate-900">Existing Operating Entity</span>
+                                                </div>
+                                                <p className="text-xs text-slate-500">
+                                                    Already incorporated with CIPZ / Registrar of Companies. Map ongoing tax, NSSA, local council, and tender obligations.
+                                                </p>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {cobeRegistered && (
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                    {/* Legal Entity Type */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Legal Entity Structure <span className="text-rose-500">*</span>
+                                            </label>
+                                            <select
+                                                value={entityType}
+                                                onChange={(e) => setEntityType(e.target.value)}
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            >
+                                                <option value="PRIVATE_LIMITED_COMPANY">Private Limited Company ((Pvt) Ltd - COBE Act)</option>
+                                                <option value="PBC">Private Business Corporation (PBC - COBE Act)</option>
+                                                <option value="PARTNERSHIP">Partnership / Joint Venture</option>
+                                                <option value="SOLE_PROPRIETORSHIP">Sole Proprietorship</option>
+                                                <option value="TRUST">Registered Business Trust</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Registered Legal Name <span className="text-rose-500">*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={registeredName}
+                                                onChange={(e) => setRegisteredName(e.target.value)}
+                                                placeholder="e.g. Apex Industrial Solutions (Pvt) Ltd"
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Trading Name (if different)
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={tradingName}
+                                                onChange={(e) => setTradingName(e.target.value)}
+                                                placeholder="e.g. Apex Engineering"
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            />
+                                        </div>
+
+                                        {isAlreadyIncorporated && (
                                             <div>
-                                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                                                    Company Registration Number
+                                                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                    CIPZ Company Registration Number
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={companyRegNumber}
                                                     onChange={(e) => setCompanyRegNumber(e.target.value)}
-                                                    placeholder="e.g. 14829/2021"
-                                                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
+                                                    placeholder="e.g. COBE-2023-48192 or 1234/2022"
+                                                    className="w-full text-xs font-mono rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {isAlreadyIncorporated && (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                    Date of Incorporation
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    value={incorporationDate}
+                                                    onChange={(e) => setIncorporationDate(e.target.value)}
+                                                    className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
                                                 />
                                             </div>
 
                                             <div>
-                                                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                                                    ZIMRA Business Partner (BP) Number
+                                                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                    Existing ZIMRA Business Partner (BP/TIN)
                                                 </label>
                                                 <input
                                                     type="text"
                                                     value={bpNumber}
                                                     onChange={(e) => setBpNumber(e.target.value)}
-                                                    placeholder="e.g. 020038914"
-                                                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
+                                                    placeholder="e.g. BP-020038914"
+                                                    className="w-full text-xs font-mono rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
                                                 />
                                             </div>
                                         </div>
                                     )}
-
-                                    <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg text-xs text-teal-900 flex items-start gap-2">
-                                        <Info className="h-4 w-4 text-[#19766F] shrink-0 mt-0.5" />
-                                        <div className="leading-relaxed">
-                                            <strong>Statutory Citation:</strong> Under Section 61 of the Income Tax Act [Chapter 23:06], every registered corporate entity must apply for a Business Partner Number within 30 days of commencing commercial operations.
-                                        </div>
-                                    </div>
                                 </div>
                             )}
 
-                            {/* STEP 2: Operations & Turnover */}
+                            {/* STEP 2: ACTIVITIES & REVENUE */}
                             {currentStep === 2 && (
-                                <div className="space-y-5">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-6">
+                                    <div className="border-b border-slate-100 pb-3">
+                                        <h2 className="text-base font-bold text-slate-900 font-heading">
+                                            Step 2: Business Activities, Revenue & Taxation
+                                        </h2>
+                                        <p className="text-xs text-slate-500">
+                                            Determine VAT thresholds (VAT Act [Chapter 23:12]), professional licensing, and sector-specific collective agreements.
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Primary Business Sector
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Primary Industry Sector <span className="text-rose-500">*</span>
                                             </label>
                                             <select
-                                                value={selectedSector}
-                                                onChange={(e) => setSelectedSector(e.target.value)}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
+                                                value={industrySector}
+                                                onChange={(e) => setIndustrySector(e.target.value)}
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
                                             >
                                                 {sectors.map((s) => (
-                                                    <option key={s.code} value={s.code}>{s.name}</option>
+                                                    <option key={s.code} value={s.code}>
+                                                        {s.name}
+                                                    </option>
                                                 ))}
                                             </select>
-                                            <p className="text-[11px] text-slate-500 mt-1">
-                                                Dictates applicable National Employment Council (NEC) collective agreements.
-                                            </p>
                                         </div>
 
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Annual Taxable Turnover Bracket
-                                            </label>
-                                            <select
-                                                value={annualTurnover}
-                                                onChange={(e) => setAnnualTurnover(e.target.value)}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
-                                            >
-                                                <option value="UNDER_25K">Below US$ 25,000 / year (Exempt from compulsory VAT)</option>
-                                                <option value="OVER_25K">US$ 25,000 – US$ 100,000 / year (Mandatory VAT SI 41/2024)</option>
-                                                <option value="OVER_100K">US$ 100,000 – US$ 1,000,000 / year (Medium Taxpayer)</option>
-                                                <option value="LARGE">Above US$ 1,000,000 / year (Large Taxpayer Office)</option>
-                                            </select>
-                                            <p className="text-[11px] text-slate-500 mt-1">
-                                                Under VAT Act Section 23 & SI 41/2024, turnover $\ge$ US$25k triggers mandatory VAT.
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                            Operational Accounting Currencies
-                                        </label>
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                            <label className={`p-3 border rounded-xl cursor-pointer transition-colors ${currencyMix === 'USD_AND_ZIG' ? 'bg-[#e2f4f2] border-[#a5dcd6]' : 'bg-white border-slate-200'}`}>
-                                                <input
-                                                    type="radio"
-                                                    name="currency_mix"
-                                                    checked={currencyMix === 'USD_AND_ZIG'}
-                                                    onChange={() => setCurrencyMix('USD_AND_ZIG')}
-                                                    className="sr-only"
-                                                />
-                                                <div className="text-xs font-bold text-slate-900">Multi-Currency (USD + ZiG)</div>
-                                                <div className="text-[10px] text-slate-500 mt-0.5">Recommended: Invoicing and wages in both currencies.</div>
-                                            </label>
-
-                                            <label className={`p-3 border rounded-xl cursor-pointer transition-colors ${currencyMix === 'USD_ONLY' ? 'bg-[#e2f4f2] border-[#a5dcd6]' : 'bg-white border-slate-200'}`}>
-                                                <input
-                                                    type="radio"
-                                                    name="currency_mix"
-                                                    checked={currencyMix === 'USD_ONLY'}
-                                                    onChange={() => setCurrencyMix('USD_ONLY')}
-                                                    className="sr-only"
-                                                />
-                                                <div className="text-xs font-bold text-slate-900">Exclusive USD</div>
-                                                <div className="text-[10px] text-slate-500 mt-0.5">Export or foreign customer operations.</div>
-                                            </label>
-
-                                            <label className={`p-3 border rounded-xl cursor-pointer transition-colors ${currencyMix === 'ZIG_ONLY' ? 'bg-[#e2f4f2] border-[#a5dcd6]' : 'bg-white border-slate-200'}`}>
-                                                <input
-                                                    type="radio"
-                                                    name="currency_mix"
-                                                    checked={currencyMix === 'ZIG_ONLY'}
-                                                    onChange={() => setCurrencyMix('ZIG_ONLY')}
-                                                    className="sr-only"
-                                                />
-                                                <div className="text-xs font-bold text-slate-900">Exclusive ZiG</div>
-                                                <div className="text-[10px] text-slate-500 mt-0.5">Local statutory currency only.</div>
-                                            </label>
-                                        </div>
-                                    </div>
-
-                                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2">
-                                        <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                                        <div className="leading-relaxed">
-                                            <strong>ZIMRA VAT Rule:</strong> Statutory Instrument 41 of 2024 established the unified VAT threshold at <strong>US$25,000</strong> per annum. Operating above this threshold without registration carries civil penalties and backdated assessments.
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* STEP 3: Workforce & Payroll */}
-                            {currentStep === 3 && (
-                                <div className="space-y-5">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Total Employee Headcount (Excluding Equity Directors)
-                                            </label>
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                value={headcount}
-                                                onChange={(e) => setHeadcount(e.target.value)}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
-                                            />
-                                            <p className="text-[11px] text-slate-500 mt-1">
-                                                Employs 1 or more staff $\implies$ Mandatory NSSA, ZIMDEF & NEC registrations.
-                                            </p>
-                                        </div>
-
-                                        <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Existing NSSA Employer Code
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Goods & Services Traded
                                             </label>
                                             <input
                                                 type="text"
-                                                value={nssaNumber}
-                                                onChange={(e) => setNssaNumber(e.target.value)}
-                                                placeholder="e.g. NSSA-1294812"
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
+                                                value={goodsAndServices}
+                                                onChange={(e) => setGoodsAndServices(e.target.value)}
+                                                placeholder="e.g. Steel fabrication, structural tanks, equipment hire"
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
                                             />
-                                            <p className="text-[11px] text-slate-500 mt-1">
-                                                Leave blank if not yet registered with NSSA.
-                                            </p>
                                         </div>
                                     </div>
 
+                                    {/* Annual Turnover & VAT statutory threshold check */}
                                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                                        <div className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                                            Statutory Payroll Levies Triggered:
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                                                Annual Taxable Turnover Estimate
+                                            </label>
+                                            <span className="text-[11px] font-semibold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full">
+                                                Statutory VAT Threshold: US$25,000
+                                            </span>
                                         </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                                            <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                                                <div className="font-bold text-slate-900">NSSA POBS & APWCS</div>
-                                                <div className="text-[11px] text-slate-500 mt-0.5">4.5% Employee + 4.5% Employer, capped at monthly statutory ceilings.</div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                            <div className="sm:col-span-2">
+                                                <div className="relative">
+                                                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">
+                                                        $
+                                                    </span>
+                                                    <input
+                                                        type="number"
+                                                        value={annualTurnoverUsd}
+                                                        onChange={(e) => setAnnualTurnoverUsd(e.target.value)}
+                                                        min="0"
+                                                        step="1000"
+                                                        className="w-full text-xs pl-7 rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3 font-mono"
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                                                <div className="font-bold text-slate-900">ZIMDEF Training Levy</div>
-                                                <div className="text-[11px] text-slate-500 mt-0.5">1% statutory assessment on gross monthly wage bill.</div>
-                                            </div>
-                                            <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                                                <div className="font-bold text-slate-900">ZIMRA PAYE & AIDS Levy</div>
-                                                <div className="text-[11px] text-slate-500 mt-0.5">Monthly withholding based on gazetted USD & ZiG tax tables.</div>
+
+                                            <div>
+                                                <select
+                                                    value={turnoverCurrency}
+                                                    onChange={(e) => setTurnoverCurrency(e.target.value as any)}
+                                                    className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                                >
+                                                    <option value="USD">USD (United States Dollar)</option>
+                                                    <option value="ZIG">ZiG (Zimbabwe Gold)</option>
+                                                </select>
                                             </div>
                                         </div>
+
+                                        {isVatThresholdExceeded ? (
+                                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2">
+                                                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                                                <div>
+                                                    <span className="font-bold">Compulsory VAT Registration Triggered:</span> Because turnover meets or exceeds the US$25,000 threshold under Section 23 of the Value Added Tax Act [Chapter 23:12], registration for VAT is mandatory.
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <p className="text-xs text-slate-500">
+                                                    Turnover is below the compulsory statutory threshold of US$25,000.
+                                                </p>
+                                                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-800">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={wantsVoluntaryVat}
+                                                        onChange={(e) => setWantsVoluntaryVat(e.target.checked)}
+                                                        className="rounded text-[#19766F] focus:ring-[#19766F]"
+                                                    />
+                                                    <span>Opt for Voluntary VAT Registration (permitted under VAT regulations for input credit claiming)</span>
+                                                </label>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Regulated Professional Activities */}
+                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                                        <label className="flex items-start gap-2.5 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={licensedProfessionInvolved}
+                                                onChange={(e) => setLicensedProfessionInvolved(e.target.checked)}
+                                                className="rounded text-[#19766F] focus:ring-[#19766F] mt-0.5"
+                                            />
+                                            <div>
+                                                <span className="text-xs font-bold text-slate-900 block">
+                                                    Practicing Regulated Professional Activities (e.g., Engineering Council, Legal, Healthcare)
+                                                </span>
+                                                <span className="text-[11px] text-slate-500 block mt-0.5">
+                                                    Triggers statutory professional council registration under the Engineering Council Act [Chapter 27:22] or relevant professional enactments.
+                                                </span>
+                                            </div>
+                                        </label>
                                     </div>
                                 </div>
                             )}
 
-                            {/* STEP 4: Premises & Location */}
-                            {currentStep === 4 && (
-                                <div className="space-y-5">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* STEP 3: WORKFORCE & PAYROLL */}
+                            {currentStep === 3 && (
+                                <div className="space-y-6">
+                                    <div className="border-b border-slate-100 pb-3">
+                                        <h2 className="text-base font-bold text-slate-900 font-heading">
+                                            Step 3: Workforce, Payroll & Social Security
+                                        </h2>
+                                        <p className="text-xs text-slate-500">
+                                            Evaluates mandatory NSSA employer registration (NSSA Act [Chapter 17:04]), 1% ZIMDEF training levy, and National Employment Council (NEC) coverage.
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Local Authority / Council Jurisdiction
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Employee Headcount <span className="text-rose-500">*</span>
                                             </label>
-                                            <select
-                                                value={selectedJurisdiction}
-                                                onChange={(e) => setSelectedJurisdiction(e.target.value)}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
-                                            >
-                                                {jurisdictions.map((j) => (
-                                                    <option key={j.code} value={j.code}>{j.name}</option>
-                                                ))}
-                                            </select>
+                                            <input
+                                                type="number"
+                                                value={employeeCount}
+                                                onChange={(e) => setEmployeeCount(e.target.value)}
+                                                min="0"
+                                                className="w-full text-xs font-mono rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            />
                                             <p className="text-[11px] text-slate-500 mt-1">
-                                                Licensing requirements governed by Urban Councils Act [Chapter 29:15].
+                                                Engaging 1 or more employees triggers mandatory NSSA and ZIMDEF registration within 30 days.
                                             </p>
                                         </div>
 
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                                                Premises Classification
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                National Employment Council (NEC) Industry Coverage
+                                            </label>
+                                            <select
+                                                value={necIndustry}
+                                                onChange={(e) => setNecIndustry(e.target.value)}
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            >
+                                                <option value="NEC_ENG">NEC for Engineering, Iron & Steel (SI 152/2017)</option>
+                                                <option value="NEC_COMM">NEC for Commercial Sectors of Zimbabwe (SI 135/2011)</option>
+                                                <option value="OTHER">Other Sectoral NEC</option>
+                                                <option value="NONE">None / Owner-Managed Only</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* Payroll Remuneration & ZIMDEF */}
+                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                                        <label className="flex items-start gap-2.5 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={paysWages}
+                                                onChange={(e) => setPaysWages(e.target.checked)}
+                                                className="rounded text-[#19766F] focus:ring-[#19766F] mt-0.5"
+                                            />
+                                            <div>
+                                                <span className="text-xs font-bold text-slate-900 block">
+                                                    Business pays regular employee wages or executive salaries
+                                                </span>
+                                                <span className="text-[11px] text-slate-500 block mt-0.5">
+                                                    Triggers mandatory 1% monthly gross wage bill training levy under Section 53 of the Manpower Planning and Development Act [Chapter 28:02].
+                                                </span>
+                                            </div>
+                                        </label>
+
+                                        {paysWages && (
+                                            <div className="pt-2">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                                    Estimated Gross Monthly Wage Bill (USD)
+                                                </label>
+                                                <div className="relative max-w-xs">
+                                                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">$</span>
+                                                    <input
+                                                        type="number"
+                                                        value={grossMonthlyWageBill}
+                                                        onChange={(e) => setGrossMonthlyWageBill(e.target.value)}
+                                                        min="0"
+                                                        className="w-full text-xs pl-7 rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3 font-mono"
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Existing NSSA and NEC identifiers */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Existing NSSA Employer Registration Number
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={nssaEmployerNumber}
+                                                onChange={(e) => {
+                                                    setNssaEmployerNumber(e.target.value);
+                                                    setHasNssaRegistration(Boolean(e.target.value.trim()));
+                                                }}
+                                                placeholder="e.g. NSSA-ER-89412"
+                                                className="w-full text-xs font-mono rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Existing NEC Registration Number
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={necRegistrationNumber}
+                                                onChange={(e) => {
+                                                    setNecRegistrationNumber(e.target.value);
+                                                    setHasNecRegistration(Boolean(e.target.value.trim()));
+                                                }}
+                                                placeholder="e.g. NEC-ENG-2024-091"
+                                                className="w-full text-xs font-mono rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Statutory Exemption declaration */}
+                                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                                        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={isExemptDiplomaticOrReligious}
+                                                onChange={(e) => setIsExemptDiplomaticOrReligious(e.target.checked)}
+                                                className="rounded text-[#19766F] focus:ring-[#19766F]"
+                                            />
+                                            <span>Registered diplomatic mission, religious or charitable institution (statutory exemption from ZIMDEF levy)</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* STEP 4: PREMISES & JURISDICTIONS */}
+                            {currentStep === 4 && (
+                                <div className="space-y-6">
+                                    <div className="border-b border-slate-100 pb-3">
+                                        <h2 className="text-base font-bold text-slate-900 font-heading">
+                                            Step 4: Business Premises & Municipal Jurisdictions
+                                        </h2>
+                                        <p className="text-xs text-slate-500">
+                                            Local authority licensing, health inspections, and municipal permits under the Urban Councils Act [Chapter 29:15].
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Primary Municipal Jurisdiction <span className="text-rose-500">*</span>
+                                            </label>
+                                            <select
+                                                value={jurisdictionCode}
+                                                onChange={(e) => setJurisdictionCode(e.target.value)}
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                            >
+                                                {jurisdictions.map((j) => (
+                                                    <option key={j.code} value={j.code}>
+                                                        {j.name} ({j.province ?? j.council_type})
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                                Premises Operational Type
                                             </label>
                                             <select
                                                 value={premisesType}
                                                 onChange={(e) => setPremisesType(e.target.value)}
-                                                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#19766F]"
+                                                className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
                                             >
-                                                <option value="COMMERCIAL_WORKSHOP">Commercial Workshop / Factory</option>
                                                 <option value="COMMERCIAL_OFFICE">Commercial Office Suite</option>
-                                                <option value="RETAIL_SHOP">Retail Shopfront / Supermarket</option>
-                                                <option value="RESIDENTIAL_HOME_OFFICE">Home Office / Residential Variance</option>
-                                                <option value="MINING_SITE">Mining Claim / Remote Site</option>
+                                                <option value="RETAIL_SHOP">Retail Commercial Shopfront</option>
+                                                <option value="INDUSTRIAL_WORKSHOP">Industrial Workshop / Factory</option>
+                                                <option value="WAREHOUSE">Warehouse / Logistics Yard</option>
+                                                <option value="HOME_OFFICE">Home Office / Residential</option>
                                             </select>
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                                        <label className="flex items-start gap-3 cursor-pointer">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                                            Physical Operating Address
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={physicalAddress}
+                                            onChange={(e) => setPhysicalAddress(e.target.value)}
+                                            placeholder="e.g. 14 Kelvin Road North, Graniteside, Harare"
+                                            className="w-full text-xs rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                        />
+                                    </div>
+
+                                    {/* Existing Council Operating Licence */}
+                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                                        <label className="flex items-start gap-2.5 cursor-pointer">
                                             <input
                                                 type="checkbox"
                                                 checked={hasCouncilLicence}
                                                 onChange={(e) => setHasCouncilLicence(e.target.checked)}
-                                                className="mt-0.5 rounded text-[#19766F] focus:ring-[#19766F]"
+                                                className="rounded text-[#19766F] focus:ring-[#19766F] mt-0.5"
                                             />
                                             <div>
-                                                <div className="text-xs font-bold text-slate-900">
-                                                    Our business holds a current Municipal Operating Licence / Shop Licence
-                                                </div>
-                                                <div className="text-[11px] text-slate-500 mt-0.5">
-                                                    Check this if you already hold an active licence disc or permit from the local authority. You will be prompted to upload evidence in the Document Vault.
-                                                </div>
+                                                <span className="text-xs font-bold text-slate-900 block">
+                                                    We already hold a valid Municipal Operating Licence or Health Permit
+                                                </span>
+                                                <span className="text-[11px] text-slate-500 block mt-0.5">
+                                                    Annual licence issued by City of Harare or relevant local council.
+                                                </span>
                                             </div>
                                         </label>
+
+                                        {hasCouncilLicence && (
+                                            <div className="pt-1">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                                    Council Licence / Permit Reference Number
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={councilLicenceNumber}
+                                                    onChange={(e) => setCouncilLicenceNumber(e.target.value)}
+                                                    placeholder="e.g. COH-LIC-2025-9921"
+                                                    className="w-full max-w-sm text-xs font-mono rounded-lg border-slate-300 focus:border-[#19766F] focus:ring-[#19766F] py-2 px-3"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Multi-Branch Locations Manager */}
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                                                    Additional Branch Locations ({branches.length})
+                                                </h3>
+                                                <p className="text-[11px] text-slate-500">
+                                                    Add branches operating in other municipal jurisdictions.
+                                                </p>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={addBranch}
+                                                icon={<Plus className="w-3.5 h-3.5" />}
+                                            >
+                                                Add Branch
+                                            </Button>
+                                        </div>
+
+                                        {branches.length === 0 ? (
+                                            <div className="p-4 rounded-xl border border-dashed border-slate-300 text-center text-xs text-slate-500">
+                                                No additional branches added. Operating from primary jurisdiction.
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                {branches.map((branch, idx) => (
+                                                    <div key={idx} className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <span className="font-bold text-xs text-slate-800">
+                                                                Branch #{idx + 1}
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => removeBranch(idx)}
+                                                                className="text-rose-600 hover:text-rose-800 text-xs flex items-center gap-1 cursor-pointer"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" /> Remove
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                                            <div>
+                                                                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                                                    Branch Name
+                                                                </label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={branch.name}
+                                                                    onChange={(e) => updateBranch(idx, 'name', e.target.value)}
+                                                                    placeholder="e.g. Bulawayo Depot"
+                                                                    className="w-full text-xs rounded-lg border-slate-300 py-1.5 px-2.5"
+                                                                />
+                                                            </div>
+
+                                                            <div>
+                                                                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                                                    Jurisdiction
+                                                                </label>
+                                                                <select
+                                                                    value={branch.jurisdiction_code}
+                                                                    onChange={(e) => updateBranch(idx, 'jurisdiction_code', e.target.value)}
+                                                                    className="w-full text-xs rounded-lg border-slate-300 py-1.5 px-2.5"
+                                                                >
+                                                                    {jurisdictions.map((j) => (
+                                                                        <option key={j.code} value={j.code}>
+                                                                            {j.name}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+
+                                                            <div>
+                                                                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                                                    Physical Address
+                                                                </label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={branch.physical_address}
+                                                                    onChange={(e) => updateBranch(idx, 'physical_address', e.target.value)}
+                                                                    placeholder="e.g. 88 Fife Street, Bulawayo"
+                                                                    className="w-full text-xs rounded-lg border-slate-300 py-1.5 px-2.5"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )}
 
-                            {/* STEP 5: Public Procurement & Industry */}
+                            {/* STEP 5: PROCUREMENT & REVIEW */}
                             {currentStep === 5 && (
-                                <div className="space-y-5">
-                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
-                                        <div className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                                            Public Procurement & Tendership (PPDPA Act)
-                                        </div>
+                                <div className="space-y-6">
+                                    <div className="border-b border-slate-100 pb-3">
+                                        <h2 className="text-base font-bold text-slate-900 font-heading">
+                                            Step 5: Public Procurement, Tenders & Final Review
+                                        </h2>
+                                        <p className="text-xs text-slate-500">
+                                            PRAZ supplier registration under the Public Procurement and Disposal of Public Assets Act [Chapter 22:23] and review of all entered details.
+                                        </p>
+                                    </div>
 
+                                    {/* PRAZ Tenders Section */}
+                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
                                         <label className="flex items-start gap-3 cursor-pointer">
                                             <input
                                                 type="checkbox"
-                                                checked={bidOnTenders}
-                                                onChange={(e) => setBidOnTenders(e.target.checked)}
+                                                checked={bidsOnGovernmentTenders}
+                                                onChange={(e) => setBidsOnGovernmentTenders(e.target.checked)}
                                                 className="mt-0.5 rounded text-[#19766F] focus:ring-[#19766F]"
                                             />
                                             <div>
@@ -725,208 +1289,561 @@ export default function RegisterIndex({ sectors, jurisdictions }: RegisterIndexP
                                                     We intend to bid on Zimbabwean Government, Municipal, or Parastatal Tenders
                                                 </div>
                                                 <div className="text-[11px] text-slate-500 mt-0.5">
-                                                    Triggers mandatory <strong>PRAZ Supplier Registration</strong> under the Public Procurement and Disposal of Public Assets Act [Chapter 22:23].
+                                                    Triggers mandatory <strong>PRAZ Supplier Registration</strong> on the e-GP portal under the PPDPA Act [Chapter 22:23].
                                                 </div>
                                             </div>
                                         </label>
 
-                                        {bidOnTenders && (
-                                            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-900">
-                                                <strong>PRAZ Pre-requisites:</strong> Bidding requires active ZIMRA ITF263 Tax Clearance, NSSA Compliance Clearance, and registered CR14/CR6 forms.
+                                        {bidsOnGovernmentTenders && (
+                                            <div className="space-y-3 pt-2 border-t border-slate-200/80">
+                                                <div>
+                                                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                                        Existing PRAZ Registration Number (if already registered)
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        value={prazSupplierNumber}
+                                                        onChange={(e) => setPrazSupplierNumber(e.target.value)}
+                                                        placeholder="e.g. PRAZ-2026-8912"
+                                                        className="w-full max-w-sm text-xs font-mono rounded-lg border-slate-300 py-2 px-3"
+                                                    />
+                                                </div>
+
+                                                <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg text-xs text-teal-900">
+                                                    <strong>PRAZ Hard Prerequisites:</strong> Participating in public tenders requires foundational Certificate of Incorporation (CIPZ), ZIMRA ITF263 Tax Clearance, and NSSA Compliance Clearance.
+                                                </div>
                                             </div>
                                         )}
                                     </div>
 
-                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4">
-                                        <div className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                                            Professional & Industry Associations
-                                        </div>
-
-                                        <label className="flex items-start gap-3 cursor-pointer">
+                                    {/* Voluntary Association: CZI */}
+                                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                                        <label className="flex items-start gap-2.5 cursor-pointer">
                                             <input
                                                 type="checkbox"
-                                                checked={isEngineeringFirm}
-                                                onChange={(e) => setIsEngineeringFirm(e.target.checked)}
-                                                className="mt-0.5 rounded text-[#19766F] focus:ring-[#19766F]"
+                                                checked={wantsCziMembership}
+                                                onChange={(e) => setWantsCziMembership(e.target.checked)}
+                                                className="rounded text-[#19766F] focus:ring-[#19766F] mt-0.5"
                                             />
                                             <div>
-                                                <div className="text-xs font-bold text-slate-900">
-                                                    Engineering Council of Zimbabwe (ECZ) Firm Practising Licence
-                                                </div>
-                                                <div className="text-[11px] text-slate-500 mt-0.5">
-                                                    Mandatory under Engineering Council Act [Chapter 27:22] for firms offering professional engineering consulting.
-                                                </div>
+                                                <span className="text-xs font-bold text-slate-900 block">
+                                                    Confederation of Zimbabwe Industries (CZI) Membership
+                                                </span>
+                                                <span className="text-[11px] text-slate-500 block mt-0.5">
+                                                    Voluntary industrial advocacy & networking body (non-statutory).
+                                                </span>
                                             </div>
                                         </label>
+                                    </div>
 
-                                        <label className="flex items-start gap-3 cursor-pointer">
+                                    {/* Comprehensive Summary Box */}
+                                    <div className="p-5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-4">
+                                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                            <h3 className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                                                Discovery Profile Summary
+                                            </h3>
+                                            <span className="text-[11px] text-slate-500 font-medium">
+                                                Ready for Deterministic Evaluation
+                                            </span>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                                            <div>
+                                                <span className="text-slate-400 block text-[10px] uppercase font-bold">Entity Structure</span>
+                                                <span className="font-bold text-slate-900">{entityType.replace(/_/g, ' ')}</span>
+                                                <span className="text-[11px] text-slate-600 block">{businessMode === 'NEW' ? 'New Business' : 'Existing Company'}</span>
+                                            </div>
+
+                                            <div>
+                                                <span className="text-slate-400 block text-[10px] uppercase font-bold">Turnover & VAT</span>
+                                                <span className="font-bold text-slate-900">${parseFloat(annualTurnoverUsd).toLocaleString()} USD</span>
+                                                <span className="text-[11px] text-slate-600 block">
+                                                    {isVatThresholdExceeded ? 'Compulsory VAT Triggered' : (wantsVoluntaryVat ? 'Voluntary VAT Opted' : 'Under Threshold')}
+                                                </span>
+                                            </div>
+
+                                            <div>
+                                                <span className="text-slate-400 block text-[10px] uppercase font-bold">Workforce & NEC</span>
+                                                <span className="font-bold text-slate-900">{employeeCount} Employees</span>
+                                                <span className="text-[11px] text-slate-600 block">{necIndustry.replace(/_/g, ' ')}</span>
+                                            </div>
+
+                                            <div>
+                                                <span className="text-slate-400 block text-[10px] uppercase font-bold">Location & PRAZ</span>
+                                                <span className="font-bold text-slate-900">{jurisdictionCode}</span>
+                                                <span className="text-[11px] text-slate-600 block">
+                                                    {bidsOnGovernmentTenders ? 'Public Tenders (PRAZ Active)' : 'No Public Tenders'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Confirmation Checkbox */}
+                                    <div className="p-4 rounded-xl border border-teal-200 bg-teal-50/50 space-y-2">
+                                        <label className="flex items-start gap-2.5 cursor-pointer">
                                             <input
                                                 type="checkbox"
-                                                checked={joinCzi}
-                                                onChange={(e) => setJoinCzi(e.target.checked)}
-                                                className="mt-0.5 rounded text-[#19766F] focus:ring-[#19766F]"
+                                                checked={confirmationAccurate}
+                                                onChange={(e) => setConfirmationAccurate(e.target.checked)}
+                                                className="rounded text-[#19766F] focus:ring-[#19766F] mt-0.5"
                                             />
-                                            <div>
-                                                <div className="text-xs font-bold text-slate-900">
-                                                    Confederation of Zimbabwe Industries (CZI) Membership
-                                                </div>
-                                                <div className="text-[11px] text-slate-500 mt-0.5">
-                                                    Voluntary private industrial association (optional advocacy membership).
-                                                </div>
-                                            </div>
+                                            <span className="text-xs text-teal-950 font-medium">
+                                                I confirm that the entered business discovery information is accurate and reflects our current operating structure. I authorize the deterministic evaluation of applicable Zimbabwean statutory obligations.
+                                            </span>
                                         </label>
                                     </div>
                                 </div>
                             )}
                         </CardContent>
 
-                        <CardFooter className="flex items-center justify-between">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setCurrentStep(Math.max(1, currentStep - 1))}
-                                disabled={currentStep === 1}
-                                icon={<ArrowLeft className="h-3.5 w-3.5" />}
-                            >
-                                Previous Step
-                            </Button>
+                        {/* Navigation & Action Footer */}
+                        <CardFooter className="flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-slate-50 border-t border-slate-100 rounded-b-xl">
+                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                        const prevStep = Math.max(1, currentStep - 1);
+                                        handleSaveDraft(prevStep);
+                                        setCurrentStep(prevStep);
+                                    }}
+                                    disabled={currentStep === 1 || isSubmitting}
+                                    icon={<ArrowLeft className="h-3.5 w-3.5" />}
+                                >
+                                    Previous
+                                </Button>
 
-                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleSaveDraft()}
+                                    disabled={isSavingDraft || isSubmitting}
+                                    icon={<Save className="h-3.5 w-3.5" />}
+                                >
+                                    {isSavingDraft ? 'Saving Draft...' : 'Save Draft'}
+                                </Button>
+                            </div>
+
+                            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                                 {currentStep < 5 ? (
                                     <Button
+                                        type="button"
                                         variant="primary"
                                         size="sm"
-                                        onClick={() => setCurrentStep(currentStep + 1)}
+                                        onClick={() => {
+                                            const nextStep = currentStep + 1;
+                                            handleSaveDraft(nextStep);
+                                            setCurrentStep(nextStep);
+                                        }}
                                         icon={<ArrowRight className="h-3.5 w-3.5" />}
                                     >
                                         Next Step
                                     </Button>
                                 ) : (
                                     <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={() => setSubmitted(true)}
-                                        icon={<FileCheck className="h-3.5 w-3.5" />}
+                                        type="button"
+                                        variant="primary"
+                                        size="md"
+                                        onClick={handleSubmit}
+                                        disabled={isSubmitting || !confirmationAccurate}
+                                        icon={isSubmitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <FileCheck className="h-4 w-4" />}
                                     >
-                                        Review & Generate Statutory Roadmap
+                                        {isSubmitting ? 'Evaluating Statutory Rules...' : 'Submit & Generate Statutory Roadmap'}
                                     </Button>
                                 )}
                             </div>
                         </CardFooter>
                     </Card>
                 ) : (
-                    /* GENERATED STATUTORY ROADMAP SCREEN */
+                    /* ------------------------------------------------------------- */
+                    /* DETERMINISTIC STATUTORY ROADMAP (Phase D, E, F)              */
+                    /* ------------------------------------------------------------- */
                     <div className="space-y-6">
-                        {/* Summary Header */}
-                        <div className="bg-[#14263D] text-white p-6 rounded-xl border border-[#1C3554] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
-                            <div className="space-y-1">
-                                <div className="flex items-center gap-2">
-                                    <Badge variant="teal" size="sm">
-                                        Deterministic Rules Engine Output
-                                    </Badge>
-                                    <span className="text-xs text-slate-300">
-                                        Evaluated across 11 Zimbabwean Statutory Authorities
-                                    </span>
-                                </div>
-                                <h2 className="font-heading font-extrabold text-xl text-white">
-                                    Official Statutory Roadmap & Compliance Matrix
-                                </h2>
-                                <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-                                    Derived from the Companies Act, Income Tax Act, VAT Act (SI 41/2024), NSSA Act, ZIMDEF Act, and Urban Councils Act.
-                                </p>
-                            </div>
+                        {/* Assessment KPI Summary Header */}
+                        {activeAssessment && (
+                            <div className="bg-white rounded-xl border border-slate-200/90 p-5 shadow-xs space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                                    <div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <Badge variant="teal" size="sm">
+                                                {activeAssessment.assessment_type === 'REASSESSMENT' ? 'Statutory Reassessment' : 'Initial Registration Roadmap'}
+                                            </Badge>
+                                            <span className="text-[11px] text-slate-500 font-mono">
+                                                ID: {activeAssessment.assessment_id.slice(0, 13)}...
+                                            </span>
+                                            {activeAssessment.is_idempotent_replay && (
+                                                <Badge variant="neutral" size="sm">Idempotent Snapshot</Badge>
+                                            )}
+                                        </div>
+                                        <h2 className="font-heading font-extrabold text-lg text-slate-900">
+                                            Deterministic Regulatory Applicability Roadmap
+                                        </h2>
+                                        <p className="text-xs text-slate-500">
+                                            Evaluated on {new Date(activeAssessment.assessed_at).toLocaleDateString([], { day: '2-digit', month: 'long', year: 'numeric' })} under active Zimbabwean statutory acts and official gazettes.
+                                        </p>
+                                    </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setSubmitted(false)}
-                                    icon={<RotateCcw className="h-3.5 w-3.5" />}
-                                    className="!bg-white/10 !text-white !border-white/30 hover:!bg-white/20"
-                                >
-                                    Modify Answers
-                                </Button>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setViewMode('QUESTIONNAIRE')}
+                                            icon={<RotateCcw className="h-3.5 w-3.5" />}
+                                        >
+                                            Update Circumstances
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {/* Metric Badges / KPIs */}
+                                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                                    <div className="p-3 rounded-lg bg-rose-50/70 border border-rose-200">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 block">Mandatory</span>
+                                        <span className="text-xl font-extrabold text-rose-900">{activeAssessment.summary.mandatory_count}</span>
+                                    </div>
+
+                                    <div className="p-3 rounded-lg bg-amber-50/70 border border-amber-200">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">Conditional</span>
+                                        <span className="text-xl font-extrabold text-amber-900">{activeAssessment.summary.conditional_count}</span>
+                                    </div>
+
+                                    <div className="p-3 rounded-lg bg-emerald-50/70 border border-emerald-200">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">Exempt</span>
+                                        <span className="text-xl font-extrabold text-emerald-900">{activeAssessment.summary.exempt_count}</span>
+                                    </div>
+
+                                    <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 block">Not Applicable</span>
+                                        <span className="text-xl font-extrabold text-slate-800">{activeAssessment.summary.not_applicable_count}</span>
+                                    </div>
+
+                                    <div className="p-3 rounded-lg bg-purple-50/70 border border-purple-200">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 block">Unverified Holds</span>
+                                        <span className="text-xl font-extrabold text-purple-900">{activeAssessment.summary.unverified_hold_count}</span>
+                                    </div>
+
+                                    <div className="p-3 rounded-lg bg-sky-50/70 border border-sky-200">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-sky-700 block">Total Evaluated</span>
+                                        <span className="text-xl font-extrabold text-sky-900">{activeAssessment.summary.total_evaluated}</span>
+                                    </div>
+                                </div>
                             </div>
+                        )}
+
+                        {/* Roadmap Tabs */}
+                        <div className="flex items-center gap-2 border-b border-slate-200 text-xs font-semibold">
+                            <button
+                                onClick={() => setRoadmapTab('ROADMAP')}
+                                className={`pb-2.5 px-3 border-b-2 cursor-pointer transition-all ${
+                                    roadmapTab === 'ROADMAP'
+                                        ? 'border-[#19766F] text-[#19766F]'
+                                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                                }`}
+                            >
+                                Active Roadmap ({activeAssessment?.roadmap.length ?? 0})
+                            </button>
+
+                            <button
+                                onClick={() => setRoadmapTab('EXEMPTIONS')}
+                                className={`pb-2.5 px-3 border-b-2 cursor-pointer transition-all ${
+                                    roadmapTab === 'EXEMPTIONS'
+                                        ? 'border-[#19766F] text-[#19766F]'
+                                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                                }`}
+                            >
+                                Statutory Exemptions ({activeAssessment?.exemptions.length ?? 0})
+                            </button>
+
+                            <button
+                                onClick={() => setRoadmapTab('NOT_APPLICABLE')}
+                                className={`pb-2.5 px-3 border-b-2 cursor-pointer transition-all ${
+                                    roadmapTab === 'NOT_APPLICABLE'
+                                        ? 'border-[#19766F] text-[#19766F]'
+                                        : 'border-transparent text-slate-500 hover:text-slate-800'
+                                }`}
+                            >
+                                Not Applicable ({activeAssessment?.not_applicable.length ?? 0})
+                            </button>
+
+                            {assessment_history.length > 0 && (
+                                <button
+                                    onClick={() => setRoadmapTab('HISTORY')}
+                                    className={`pb-2.5 px-3 border-b-2 cursor-pointer transition-all ${
+                                        roadmapTab === 'HISTORY'
+                                            ? 'border-[#19766F] text-[#19766F]'
+                                            : 'border-transparent text-slate-500 hover:text-slate-800'
+                                    }`}
+                                >
+                                    Assessment History ({assessment_history.length})
+                                </button>
+                            )}
                         </div>
 
-                        {/* Roadmap Matrix Table */}
-                        <Card>
-                            <CardHeader>
-                                <div>
-                                    <CardTitle>
-                                        <Layers className="h-4 w-4 text-[#19766F]" />
-                                        Evaluated Statutory Obligations ({roadmapItems.length} Mapped)
-                                    </CardTitle>
-                                    <CardDescription>
-                                        Notice: Declaring an existing certificate sets evidence status to User Declared. Supporting certificates must be verified in the Document Vault.
-                                    </CardDescription>
+                        {/* TAB 1: ACTIVE ROADMAP */}
+                        {roadmapTab === 'ROADMAP' && (
+                            <div className="space-y-4">
+                                <div className="p-3 rounded-lg bg-teal-50/70 border border-teal-200 text-xs text-teal-900 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Scale className="w-4 h-4 text-teal-700 shrink-0" />
+                                        <span>
+                                            Topologically sequenced in strict prerequisite dependency order (Kahn's DAG algorithm).
+                                        </span>
+                                    </div>
+                                    <span className="text-[11px] font-semibold text-teal-800">
+                                        Rule Versions Gazetted & Verified
+                                    </span>
                                 </div>
-                            </CardHeader>
-                            <CardContent className="p-0">
-                                <div className="overflow-x-auto">
+
+                                <div className="space-y-3">
+                                    {activeAssessment?.roadmap.map((item) => {
+                                        const isDeclared = item.declared_registration && item.declared_registration.declared_number;
+                                        return (
+                                            <Card key={item.obligation_code} className="overflow-hidden">
+                                                <div className="p-5 space-y-4">
+                                                    {/* Card Header Row */}
+                                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="h-8 w-8 rounded-lg bg-slate-100 text-slate-800 font-extrabold flex items-center justify-center text-xs shrink-0 border border-slate-200">
+                                                                #{item.sequence_number}
+                                                            </div>
+
+                                                            <div className="space-y-1">
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <span className="font-extrabold text-sm text-slate-900 font-heading">
+                                                                        {item.title}
+                                                                    </span>
+                                                                    <Badge variant="neutral" size="sm">
+                                                                        {item.authority?.code ?? 'AUTHORITY'}
+                                                                    </Badge>
+                                                                    {getDecisionBadge(item.applicability_decision)}
+                                                                </div>
+
+                                                                <p className="text-xs text-slate-500 font-mono">
+                                                                    {item.source_citation ?? 'Statutory Law of Zimbabwe'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Status & Portal */}
+                                                        <div className="flex items-center gap-2 self-start">
+                                                            {item.authority?.portal_url && (
+                                                                <a
+                                                                    href={item.authority.portal_url}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#19766F] hover:underline"
+                                                                >
+                                                                    <span>{item.authority.code} Portal</span>
+                                                                    <ExternalLink className="w-3 h-3" />
+                                                                </a>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Legal Classification & Rule Version Grid */}
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                                        <div>
+                                                            <span className="text-[10px] text-slate-400 font-bold uppercase block">Classification</span>
+                                                            <span className="font-semibold text-slate-800">
+                                                                {item.legal_classification.replace(/_/g, ' ')}
+                                                            </span>
+                                                        </div>
+
+                                                        <div>
+                                                            <span className="text-[10px] text-slate-400 font-bold uppercase block">Rule Version</span>
+                                                            <span className="font-mono text-slate-800">
+                                                                {item.applicable_rule_version?.version_code ?? 'Draft/Pending'}
+                                                            </span>
+                                                            <span className="text-[10px] text-emerald-700 block">
+                                                                {item.verification_status}
+                                                            </span>
+                                                        </div>
+
+                                                        <div>
+                                                            <span className="text-[10px] text-slate-400 font-bold uppercase block">Prerequisites</span>
+                                                            {item.required_prerequisites.length > 0 ? (
+                                                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                                                    {item.required_prerequisites.map((prereq) => (
+                                                                        <span key={prereq} className="bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0.5 rounded font-mono font-medium">
+                                                                            {prereq}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-slate-500 text-[11px]">None (Foundational)</span>
+                                                            )}
+                                                        </div>
+
+                                                        <div>
+                                                            <span className="text-[10px] text-slate-400 font-bold uppercase block">Processing Estimate</span>
+                                                            <span className="font-medium text-slate-800">
+                                                                ~{item.estimated_processing_days ?? 5} Working Days
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Evidence / Declared Status Disclaimer */}
+                                                    {isDeclared ? (
+                                                        <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-950 flex items-start gap-2.5">
+                                                            <Info className="w-4 h-4 text-teal-700 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <span className="font-bold">Declared Active: </span>
+                                                                <span className="font-mono">Reg No: {item.declared_registration?.declared_number}</span>
+                                                                <p className="text-[11px] text-teal-800 mt-0.5">
+                                                                    Status: <strong>USER DECLARED (UNVERIFIED)</strong>. In accordance with ZimComply regulatory governance, declaring a certificate does not confer verified compliance until supporting documentation is uploaded and verified.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 flex items-start gap-2.5">
+                                                            <FileText className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <span className="font-bold">Required Documents for Filing: </span>
+                                                                <span>{item.evidence_requirements?.required_documents.join(', ') || 'Statutory Forms & IDs'}</span>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Trigger Reasons */}
+                                                    {item.trigger_reasons && item.trigger_reasons.length > 0 && (
+                                                        <div className="text-xs space-y-1">
+                                                            <span className="text-[10px] uppercase font-bold text-slate-400">Deterministic Evaluation Trigger:</span>
+                                                            <ul className="list-disc list-inside text-slate-600 text-[11px] space-y-0.5">
+                                                                {item.trigger_reasons.map((reason, i) => (
+                                                                    <li key={i}>{reason}</li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="px-5 py-3 bg-slate-50/60 border-t border-slate-100 flex items-center justify-between text-xs">
+                                                    <span className="text-[11px] text-slate-500">
+                                                        Renewal: {item.evidence_requirements?.renewal_frequency ?? 'ONCE_OFF'}
+                                                    </span>
+                                                    <Button
+                                                        href="/documents"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        icon={<FileCheck className="w-3.5 h-3.5" />}
+                                                    >
+                                                        Upload Supporting Certificate
+                                                    </Button>
+                                                </div>
+                                            </Card>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* TAB 2: EXEMPTIONS */}
+                        {roadmapTab === 'EXEMPTIONS' && (
+                            <div className="space-y-3">
+                                {activeAssessment?.exemptions.length === 0 ? (
+                                    <div className="p-8 rounded-xl border border-slate-200 text-center text-xs text-slate-500 bg-white">
+                                        No statutory exemptions triggered for this business profile.
+                                    </div>
+                                ) : (
+                                    activeAssessment?.exemptions.map((ex: any, idx: number) => (
+                                        <Card key={idx} className="p-4 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="font-bold text-sm text-slate-900">
+                                                    {ex.title ?? ex.obligation_code}
+                                                </div>
+                                                <Badge variant="success" size="sm">EXEMPT</Badge>
+                                            </div>
+                                            <p className="text-xs text-slate-600">
+                                                {ex.trigger_reasons?.[0] ?? 'Qualifies for statutory exemption under relevant Act.'}
+                                            </p>
+                                        </Card>
+                                    ))
+                                )}
+                            </div>
+                        )}
+
+                        {/* TAB 3: NOT APPLICABLE */}
+                        {roadmapTab === 'NOT_APPLICABLE' && (
+                            <div className="space-y-3">
+                                {activeAssessment?.not_applicable.length === 0 ? (
+                                    <div className="p-8 rounded-xl border border-slate-200 text-center text-xs text-slate-500 bg-white">
+                                        All catalogued obligations were either triggered or exempted.
+                                    </div>
+                                ) : (
+                                    activeAssessment?.not_applicable.map((na: any, idx: number) => (
+                                        <Card key={idx} className="p-4 space-y-1">
+                                            <div className="flex items-center justify-between">
+                                                <div className="font-bold text-sm text-slate-900">
+                                                    {na.title ?? na.obligation_code}
+                                                </div>
+                                                <Badge variant="neutral" size="sm">NOT APPLICABLE</Badge>
+                                            </div>
+                                            <p className="text-xs text-slate-500">
+                                                Threshold or criteria condition not met by business profile.
+                                            </p>
+                                        </Card>
+                                    ))
+                                )}
+                            </div>
+                        )}
+
+                        {/* TAB 4: HISTORY & AUDIT TRAIL */}
+                        {roadmapTab === 'HISTORY' && (
+                            <Card>
+                                <CardHeader>
+                                    <div>
+                                        <CardTitle>Historical Assessment Audit Trail</CardTitle>
+                                        <CardDescription>
+                                            Immutable snapshots of prior statutory assessments preserved for regulatory audit compliance.
+                                        </CardDescription>
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="p-0">
                                     <table className="w-full text-left text-xs">
-                                        <thead className="bg-slate-50 text-[11px] font-semibold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                                        <thead className="bg-slate-50 text-[11px] font-semibold text-slate-500 uppercase border-b border-slate-200">
                                             <tr>
-                                                <th className="py-3 px-4">Authority & Obligation</th>
-                                                <th className="py-3 px-4">Legal Citation</th>
-                                                <th className="py-3 px-4">Classification</th>
-                                                <th className="py-3 px-4">Evidence Status</th>
-                                                <th className="py-3 px-4">Fee Estimate</th>
+                                                <th className="py-3 px-4">Generated Date</th>
+                                                <th className="py-3 px-4">Type</th>
+                                                <th className="py-3 px-4">Total Evaluated</th>
+                                                <th className="py-3 px-4">Mandatory Obligations</th>
                                                 <th className="py-3 px-4 text-right">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {roadmapItems.map((item, idx) => (
-                                                <tr key={idx} className="hover:bg-slate-50/60 transition-colors">
+                                            {assessment_history.map((hist) => (
+                                                <tr key={hist.id} className="hover:bg-slate-50/60">
+                                                    <td className="py-3 px-4 font-medium text-slate-900">
+                                                        {hist.formatted_date}
+                                                    </td>
                                                     <td className="py-3 px-4">
-                                                        <div className="font-bold text-slate-900">{item.name}</div>
-                                                        <div className="text-[10px] text-slate-500 font-semibold">{item.authority}</div>
-                                                    </td>
-                                                    <td className="py-3 px-4 font-mono text-[11px] text-slate-600 max-w-xs">
-                                                        {item.citation}
-                                                    </td>
-                                                    <td className="py-3 px-4 whitespace-nowrap">
-                                                        <Badge variant="neutral" size="sm">
-                                                            {item.type.replace(/_/g, ' ')}
+                                                        <Badge variant={hist.assessment_type === 'REASSESSMENT' ? 'teal' : 'neutral'} size="sm">
+                                                            {hist.assessment_type}
                                                         </Badge>
                                                     </td>
-                                                    <td className="py-3 px-4 whitespace-nowrap">
-                                                        <Badge variant={item.statusVariant} size="sm">
-                                                            {item.statusLabel}
-                                                        </Badge>
+                                                    <td className="py-3 px-4 text-slate-600">
+                                                        {hist.total_evaluated} Requirements
                                                     </td>
-                                                    <td className="py-3 px-4 text-slate-700 whitespace-nowrap">
-                                                        {item.cost}
+                                                    <td className="py-3 px-4">
+                                                        <span className="font-bold text-rose-700">{hist.mandatory_count} Mandatory</span>
                                                     </td>
-                                                    <td className="py-3 px-4 text-right whitespace-nowrap">
+                                                    <td className="py-3 px-4 text-right">
                                                         <Button
-                                                            href="/documents"
                                                             variant="outline"
                                                             size="sm"
+                                                            onClick={() => handleLoadHistorical(hist.id)}
                                                         >
-                                                            Upload Evidence
+                                                            View Snapshot
                                                         </Button>
                                                     </td>
                                                 </tr>
                                             ))}
                                         </tbody>
                                     </table>
-                                </div>
-                            </CardContent>
-                            <CardFooter className="flex items-center justify-between text-xs text-slate-500">
-                                <div>
-                                    Showing {roadmapItems.length} evaluated requirements for {entityType.replace(/_/g, ' ')}.
-                                </div>
-                                <Button
-                                    href="/documents"
-                                    variant="primary"
-                                    size="sm"
-                                    icon={<FileCheck className="h-3.5 w-3.5" />}
-                                >
-                                    Proceed to Document Vault
-                                </Button>
-                            </CardFooter>
-                        </Card>
+                                </CardContent>
+                            </Card>
+                        )}
                     </div>
                 )}
             </div>

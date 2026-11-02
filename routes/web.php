@@ -24,7 +24,11 @@ Route::middleware(['auth'])->group(function () {
 
     // 7 Core Navigation Workspaces
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    Route::get('/registration', [DashboardController::class, 'register'])->name('register.index');
+    Route::get('/registration', [\App\Http\Controllers\RegistrationController::class, 'index'])->name('register.index');
+    Route::post('/registration/questionnaire/save', [\App\Http\Controllers\RegistrationController::class, 'saveDraft'])->name('register.questionnaire.save');
+    Route::post('/registration/questionnaire/submit', [\App\Http\Controllers\RegistrationController::class, 'submit'])->name('register.questionnaire.submit');
+    Route::post('/registration/reassess', [\App\Http\Controllers\RegistrationController::class, 'reassess'])->name('register.reassess');
+    Route::get('/registration/assessments/{id}', [\App\Http\Controllers\RegistrationController::class, 'showAssessment'])->name('register.assessment.show');
     Route::get('/comply', [DashboardController::class, 'comply'])->name('comply.index');
     Route::get('/renew', [DashboardController::class, 'renew'])->name('renew.index');
     Route::get('/tender', [DashboardController::class, 'tender'])->name('tender.index');

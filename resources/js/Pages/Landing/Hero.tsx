@@ -184,26 +184,47 @@ export function Hero() {
                             </div>
                         </div>
 
-                        {/* Panel 2: Verified Evidence Vault & Readiness Gauge - 3 Cols */}
-                        <div className="lg:col-span-3 rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-5 flex flex-col justify-between">
+                        {/* Panel 2: Explicitly Illustrative Registration Workflow Preview - 3 Cols */}
+                        <div className="lg:col-span-3 rounded-xl bg-slate-900 border border-slate-800 p-5 space-y-4 flex flex-col justify-between">
                             <div>
-                                <div className="flex items-center gap-2 mb-4">
-                                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                                    <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
-                                        Audit Readiness
-                                    </h2>
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <span className="h-2 w-2 rounded-full bg-teal-400" />
+                                        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                                            Workflow Preview
+                                        </h2>
+                                    </div>
+                                    <span className="text-[10px] font-medium bg-teal-950 text-teal-300 border border-teal-800/60 px-2 py-0.5 rounded-full">
+                                        Illustrative
+                                    </span>
                                 </div>
 
-                                {/* Circular-styled Gauge Metric */}
-                                <div className="py-4 text-center">
-                                    <div className="inline-flex items-center justify-center h-28 w-28 rounded-full border-4 border-[#19766F] bg-slate-950/60 relative">
-                                        <div className="flex flex-col items-center">
-                                            <span className="text-2xl font-black text-white">84%</span>
-                                            <span className="text-[10px] text-teal-300 font-semibold uppercase">VERIFIED</span>
+                                <p className="text-[11px] text-slate-400 mb-4">
+                                    Deterministic multi-step registration discovery & statutory sequencing:
+                                </p>
+
+                                <div className="space-y-2.5">
+                                    <div className="flex items-center gap-2.5 text-xs p-2 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                                        <div className="h-5 w-5 rounded-full bg-teal-900/60 text-teal-300 flex items-center justify-center text-[10px] font-bold shrink-0">1</div>
+                                        <div className="truncate">
+                                            <span className="text-white font-medium block text-[11px]">Business Profile Discovery</span>
+                                            <span className="text-[10px] text-slate-400">Sector, Turnover, Workforce, Premises</span>
                                         </div>
                                     </div>
-                                    <p className="text-xs text-slate-300 font-medium mt-3">Evidence Trust Status</p>
-                                    <p className="text-[11px] text-slate-500">6 of 7 Obligation Documents Sealed</p>
+                                    <div className="flex items-center gap-2.5 text-xs p-2 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                                        <div className="h-5 w-5 rounded-full bg-teal-900/60 text-teal-300 flex items-center justify-center text-[10px] font-bold shrink-0">2</div>
+                                        <div className="truncate">
+                                            <span className="text-white font-medium block text-[11px]">Deterministic Rules Evaluation</span>
+                                            <span className="text-[10px] text-slate-400">Zero AI hallucination • Statutory Acts</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2.5 text-xs p-2 rounded-lg bg-slate-950/70 border border-slate-800/80">
+                                        <div className="h-5 w-5 rounded-full bg-emerald-900/60 text-emerald-300 flex items-center justify-center text-[10px] font-bold shrink-0">3</div>
+                                        <div className="truncate">
+                                            <span className="text-white font-medium block text-[11px]">Prerequisite Sequenced Roadmap</span>
+                                            <span className="text-[10px] text-slate-400">Topological DAG order & evidence links</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -211,9 +232,9 @@ export function Hero() {
                                 <div className="flex items-center justify-between text-[11px]">
                                     <span className="text-slate-400 flex items-center gap-1.5">
                                         <Lock className="w-3 h-3 text-slate-400" />
-                                        SHA-256 Vault Hash
+                                        Deterministic Guarantee
                                     </span>
-                                    <span className="font-mono text-emerald-400 text-[10px]">Valid</span>
+                                    <span className="font-mono text-emerald-400 text-[10px]">Verified</span>
                                 </div>
                                 <div className="flex items-center justify-between text-[11px]">
                                     <span className="text-slate-400">Tenant Isolation Scope</span>

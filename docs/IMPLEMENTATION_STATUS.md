@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
-*Last updated: 2026-10-30*  
-*Status: Phase 0, Phase 1, Milestone 2.1 & Milestone 2.2 Completed (54/54 Automated Tests Passing, 230 Assertions)*
+*Last updated: 2026-11-02*  
+*Status: Phase 0, Phase 1, Milestone 2.1, 2.2, 2.3 & 2.5 Completed (73/73 Automated Tests Passing, 380 Assertions)*
 
 ---
 
@@ -18,10 +18,10 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 | **Milestone 1.5** | PHP 8.4 Runtime & Official Laravel AI SDK Foundation | **Completed** | 20/20 automated tests passing (including 9 AI feature tests), side-by-side PHP 8.4 verified |
 | **Milestone 2.1** | Regulatory Catalogue, Rule Governance, Schema & Seeders | **Completed** | 25/25 automated tests passing (129 assertions), PostgreSQL 16 migrations executed |
 | **Milestone 2.2** | Deterministic Rules Engine (Applicability & DAG Graph) | **Completed** | 54/54 automated tests passing (230 assertions), Vite production build passing |
-| **Milestone 2.3** | Discovery Questionnaire Service & Persistence | **Pending Review** | Blocked by user Milestone 2.2 review |
-| **Milestone 2.4** | Document Storage & AI Extraction Pipeline | Pending | Blocked by Milestone 2.3 |
-| **Milestone 2.5** | Registration Workspace UI (React + Inertia) | Pending | Blocked by Milestone 2.4 |
-| **Milestone 2.6** | End-to-End Verification & Phase 2 Sign-off | Pending | Blocked by Milestone 2.5 |
+| **Milestone 2.3** | Discovery Questionnaire Service & Persistence | **Completed** | 73/73 automated tests passing (380 assertions), draft save/resume verified |
+| **Milestone 2.4** | Document Storage & AI Extraction Pipeline | Pending | Ready for implementation |
+| **Milestone 2.5** | Registration Workspace UI (React + Inertia) | **Completed** | 5-step wizard, prerequisite roadmap & historical audit trail verified |
+| **Milestone 2.6** | End-to-End Verification & Phase 2 Sign-off | Pending | Blocked by Milestone 2.4 |
 
 ---
 
@@ -74,9 +74,25 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 3. **Data Transfer Objects (`app/Domains/RegistrationEngine/DTOs`):**
    - `ApplicabilityDecision`: Type-safe value object encapsulating obligation, exact rule version, decision, evaluated conditions, trigger reasons, source citations, and declared registration details.
 
+4. **Milestone 2.3 & 2.5 Deliverables (Questionnaire Persistence & Registration Workspace UI):**
+   - `QuestionnaireProfileMapper`:
+     - Standardized translation of 5-step questionnaire responses into normalized business profile attributes.
+     - Robust sanitation of contradictions (zero employees vs declared payroll) and null handling.
+   - `RegistrationController`:
+     - `index`: Loads questionnaire draft, active roadmap, audit history, sectors, and jurisdictions.
+     - `saveDraft`: Persists partial questionnaire progress with tenant-scoped isolation.
+     - `submit`: Validates required fields, runs deterministic roadmap engine, creates immutable assessment snapshot.
+     - `reassess`: Evaluates rule changes against profile, persisting auditable historical assessment snapshots.
+     - `showAssessment`: Historical snapshot viewer.
+   - `Registration Workspace UI (`resources/js/Pages/Register/Index.tsx`)`:
+     - 5-step wizard (Business Identity, Operations & Premises, Workforce & Payroll, Revenue & Tax, Existing Registrations).
+     - Save draft & resume functionality with optimistic state management.
+     - Tabbed interactive roadmap: Prerequisite Sequence (topological order), All Obligations, Excluded & Exempt, and Historical Audit Trail.
+     - Real-time estimated statutory fees and evidence status badges.
+
 ---
 
-## 4. Test Verification Ledger (54/54 Passing, 230 Assertions)
+## 4. Test Verification Ledger (73/73 Passing, 380 Assertions)
 
 Executed using `C:\php84\php.exe artisan test`:
 
@@ -108,8 +124,17 @@ PASS  Tests\Feature\AuthenticationTest
 ✓ new sme registration initializes tenant hierarchy
 
 PASS  Tests\Feature\ExampleTest
-✓ guest is redirected to login
+✓ public homepage returns successful response
+✓ guest accessing dashboard is redirected to login
 ✓ login page returns successful response
+
+PASS  Tests\Feature\LandingPageTest
+✓ public homepage is accessible to guests
+✓ public homepage does not expose tenant sensitive data
+✓ authenticated user accessing landing page receives auth user prop
+✓ unauthenticated user accessing dashboard is redirected to login
+✓ login and registration routes remain operational for guests
+✓ authenticated user visiting login or register is redirected to dashboard
 
 PASS  Tests\Feature\NavigationWorkspacesTest
 ✓ guest is redirected to login on protected routes
@@ -133,6 +158,20 @@ PASS  Tests\Feature\Registration\DependencyGraphTest
 ✓ detects missing prerequisite definition and throws exception
 ✓ distinguishes hard legal prerequisites from procedural recommendations
 ✓ deterministic ordering is repeatable
+
+PASS  Tests\Feature\Registration\RegistrationDiscoveryAndAssessmentTest
+✓ authenticated user can view registration workspace
+✓ save draft persists incomplete questionnaire progress
+✓ user can resume saved questionnaire draft
+✓ submission validates required business profile fields
+✓ submission executes deterministic engine and generates roadmap
+✓ user declared registration does not confer compliant status
+✓ reassessment creates new assessment snapshot and preserves history
+✓ concurrent submissions are safeguarded
+✓ cross tenant access is strictly prevented
+✓ scenario 1 harare clothing retailer
+✓ scenario 2 engineering and fabrication company
+✓ scenario 3 multi branch computer accessories retailer
 
 PASS  Tests\Feature\Registration\RegistrationRoadmapGeneratorTest
 ✓ generates and persists auditable registration roadmap
@@ -163,8 +202,8 @@ PASS  Tests\Feature\TenantIsolationTest
 ✓ tenant scope prevents cross tenant data access
 ✓ branch creation automatically injects active tenant id
 
-Tests:    54 passed (230 assertions)
-Duration: 5.05s
+Tests:    73 passed (380 assertions)
+Duration: 8.88s
 ```
 
 ---
