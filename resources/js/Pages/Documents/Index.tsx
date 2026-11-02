@@ -64,8 +64,11 @@ interface VaultDocument {
     sha256_hash: string;
     uploaded_at: string;
     uploaded_by: string;
-    verification_status: 'PENDING' | 'VERIFIED' | 'REJECTED';
-    processing_status: 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED' | 'UNAVAILABLE';
+    verification_status: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED' | 'REVOKED';
+    processing_status: 'PENDING' | 'QUEUED' | 'PROCESSING' | 'EXTRACTED' | 'FAILED' | 'UNAVAILABLE';
+    malware_scan_status?: 'CLEARED' | 'SKIPPED' | 'QUARANTINED' | 'SCAN_FAILED';
+    last_extraction_error?: string | null;
+    extraction_attempts?: number;
     expiry_date?: string | null;
     issue_date?: string | null;
     issuing_authority?: string | null;
@@ -86,6 +89,7 @@ interface DocumentsIndexProps {
         verified_count: number;
         pending_count: number;
         rejected_count: number;
+        expired_count?: number;
     };
     is_reviewer: boolean;
     filters: {
@@ -104,6 +108,7 @@ export default function DocumentsIndex({
         verified_count: 0,
         pending_count: 0,
         rejected_count: 0,
+        expired_count: 0,
     },
     is_reviewer: isReviewer = false,
     filters = { category: 'ALL', status: 'ALL', search: '' },
@@ -118,6 +123,7 @@ export default function DocumentsIndex({
     const [rejectionReason, setRejectionReason] = useState('');
     const [selectedObligationId, setSelectedObligationId] = useState('');
     const [copiedHash, setCopiedHash] = useState<string | null>(null);
+    const [isExtracting, setIsExtracting] = useState<string | null>(null);
 
     // Edit fields state for reviewer
     const [editPayload, setEditPayload] = useState<Record<string, any>>({});
@@ -164,12 +170,20 @@ export default function DocumentsIndex({
         });
     };
 
-    const handleTriggerExtraction = (docId: string) => {
-        router.post(`/documents/${docId}/extract`, {}, {
+    const handleTriggerExtraction = (docId: string, force: boolean = false) => {
+        setIsExtracting(docId);
+        router.post(`/documents/${docId}/extract`, { force }, {
             preserveScroll: true,
             onSuccess: () => {
+                setIsExtracting(null);
                 const updated = documents.find((d) => d.id === docId);
                 if (updated) setInspectDocument(updated);
+            },
+            onError: () => {
+                setIsExtracting(null);
+            },
+            onFinish: () => {
+                setIsExtracting(null);
             },
         });
     };
@@ -250,6 +264,12 @@ export default function DocumentsIndex({
                 return { variant: 'success', label: 'Human Verified' };
             case 'REJECTED':
                 return { variant: 'danger', label: 'Rejected' };
+            case 'EXPIRED':
+                return { variant: 'danger', label: 'Expired Evidence' };
+            case 'SUPERSEDED':
+                return { variant: 'slate', label: 'Superseded' };
+            case 'REVOKED':
+                return { variant: 'danger', label: 'Revoked' };
             case 'PENDING':
             default:
                 return { variant: 'warning', label: 'Pending Review' };
@@ -258,10 +278,12 @@ export default function DocumentsIndex({
 
     const getProcessingBadge = (status: VaultDocument['processing_status']): { variant: BadgeVariant; label: string } => {
         switch (status) {
-            case 'EXTRACTED':
-                return { variant: 'teal', label: 'AI Extracted' };
+            case 'QUEUED':
+                return { variant: 'purple', label: 'Extraction Queued' };
             case 'PROCESSING':
                 return { variant: 'info', label: 'Extracting...' };
+            case 'EXTRACTED':
+                return { variant: 'teal', label: 'AI Extracted' };
             case 'FAILED':
                 return { variant: 'danger', label: 'Extraction Failed' };
             case 'UNAVAILABLE':
@@ -271,6 +293,7 @@ export default function DocumentsIndex({
                 return { variant: 'neutral', label: 'Not Extracted' };
         }
     };
+
 
     return (
         <AppLayout
@@ -310,7 +333,7 @@ export default function DocumentsIndex({
                 </div>
 
                 {/* Vault Metrics Strip */}
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
                     <Card>
                         <CardContent className="p-4">
                             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Vault Evidence</span>
@@ -350,6 +373,16 @@ export default function DocumentsIndex({
                             <span className="text-[11px] text-slate-500">Requires fresh upload</span>
                         </CardContent>
                     </Card>
+
+                    <Card>
+                        <CardContent className="p-4">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700">Expired Evidence</span>
+                            <div className="text-2xl font-heading font-extrabold text-rose-700 mt-1">
+                                {stats.expired_count ?? 0} Expired
+                            </div>
+                            <span className="text-[11px] text-slate-500">Requires renewed filing</span>
+                        </CardContent>
+                    </Card>
                 </div>
 
                 {/* Filters & Search Toolbar */}
@@ -380,6 +413,8 @@ export default function DocumentsIndex({
                                     <option value="PENDING">Pending Review</option>
                                     <option value="VERIFIED">Human Verified</option>
                                     <option value="REJECTED">Rejected</option>
+                                    <option value="EXPIRED">Expired Evidence</option>
+                                    <option value="SUPERSEDED">Superseded</option>
                                 </select>
                             </div>
                         </div>
@@ -515,8 +550,11 @@ export default function DocumentsIndex({
                                                                 )}
                                                             </button>
                                                         </div>
-                                                        <div className="text-[10px] text-slate-400 mt-0.5">
-                                                            Uploaded: {doc.uploaded_at}
+                                                        <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1.5">
+                                                            <span>Uploaded: {doc.uploaded_at}</span>
+                                                            <span className="text-[9px] px-1 py-0.2 rounded bg-slate-100 text-slate-500 font-mono">
+                                                                {doc.malware_scan_status ?? 'SKIPPED'}
+                                                            </span>
                                                         </div>
                                                     </td>
 
@@ -815,7 +853,12 @@ export default function DocumentsIndex({
                                         {inspectDocument.sha256_hash}
                                     </div>
                                     <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
-                                        <span>Uploaded by {inspectDocument.uploaded_by} on {inspectDocument.uploaded_at}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span>Uploaded by {inspectDocument.uploaded_by} on {inspectDocument.uploaded_at}</span>
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-mono">
+                                                Malware: {inspectDocument.malware_scan_status ?? 'SKIPPED'}
+                                            </span>
+                                        </div>
                                         <div className="space-x-2">
                                             <a
                                                 href={`/documents/${inspectDocument.id}/preview`}
@@ -835,6 +878,19 @@ export default function DocumentsIndex({
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* Statutory Expiry Notice if applicable */}
+                                {inspectDocument.verification_status === 'EXPIRED' && (
+                                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 space-y-1">
+                                        <div className="font-bold flex items-center gap-1.5 text-xs text-rose-800">
+                                            <AlertTriangle className="h-4 w-4 text-rose-600" />
+                                            Statutory Evidence Expired:
+                                        </div>
+                                        <p className="text-[11px] text-rose-700">
+                                            This document expired on {inspectDocument.expiry_date}. Per regulatory rules, expired documents cannot maintain DOCUMENT_SUPPORTED status. Please upload an active renewal certificate.
+                                        </p>
+                                    </div>
+                                )}
 
                                 {/* Rejection Notice if applicable */}
                                 {inspectDocument.verification_status === 'REJECTED' && inspectDocument.rejection_reason && (
@@ -894,6 +950,33 @@ export default function DocumentsIndex({
                                     )}
                                 </div>
 
+                                {/* Extraction In Progress Banner */}
+                                {(inspectDocument.processing_status === 'QUEUED' || inspectDocument.processing_status === 'PROCESSING' || isExtracting === inspectDocument.id) && (
+                                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-purple-900 space-y-1">
+                                        <div className="font-bold flex items-center gap-1.5 text-xs text-purple-800">
+                                            <Clock className="h-4 w-4 text-purple-600 animate-spin" />
+                                            Asynchronous Extraction In Progress:
+                                        </div>
+                                        <p className="text-[11px] text-purple-700">
+                                            This document is queued for background AI extraction. Run your local queue worker (<code className="bg-purple-100 px-1 py-0.5 rounded font-mono">php artisan queue:work</code>) to process.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {/* Extraction Failure Banner */}
+                                {inspectDocument.processing_status === 'FAILED' && (
+                                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-900 space-y-1">
+                                        <div className="font-bold flex items-center gap-1.5 text-xs text-rose-800">
+                                            <AlertCircle className="h-4 w-4 text-rose-600" />
+                                            AI Extraction Unsuccessful:
+                                        </div>
+                                        <p className="text-[11px] text-rose-700">
+                                            {inspectDocument.last_extraction_error || 'An unexpected error occurred during extraction.'}
+                                            {inspectDocument.extraction_attempts ? ` (Attempts: ${inspectDocument.extraction_attempts})` : ''}
+                                        </p>
+                                    </div>
+                                )}
+
                                 {/* AI Extraction & Verification Panel */}
                                 <div className="border border-teal-200 bg-teal-50/30 rounded-lg p-4 space-y-3">
                                     <div className="flex items-center justify-between">
@@ -909,16 +992,32 @@ export default function DocumentsIndex({
                                                     {Math.round(inspectDocument.ai_verification_item.confidence_score * 100)}% Confidence
                                                 </Badge>
                                             )}
-                                            {inspectDocument.processing_status !== 'PROCESSING' && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleTriggerExtraction(inspectDocument.id)}
-                                                    icon={<RefreshCw className="h-3 w-3" />}
-                                                >
-                                                    {inspectDocument.processing_status === 'EXTRACTED' ? 'Re-extract' : 'Extract with AI'}
-                                                </Button>
-                                            )}
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={
+                                                    inspectDocument.processing_status === 'PROCESSING' ||
+                                                    inspectDocument.processing_status === 'QUEUED' ||
+                                                    isExtracting === inspectDocument.id
+                                                }
+                                                onClick={() => handleTriggerExtraction(
+                                                    inspectDocument.id,
+                                                    inspectDocument.processing_status === 'EXTRACTED' || inspectDocument.processing_status === 'FAILED'
+                                                )}
+                                                icon={<RefreshCw className={`h-3 w-3 ${isExtracting === inspectDocument.id || inspectDocument.processing_status === 'PROCESSING' ? 'animate-spin' : ''}`} />}
+                                            >
+                                                {isExtracting === inspectDocument.id
+                                                    ? 'Queueing...'
+                                                    : inspectDocument.processing_status === 'QUEUED'
+                                                    ? 'Queued'
+                                                    : inspectDocument.processing_status === 'PROCESSING'
+                                                    ? 'Extracting...'
+                                                    : inspectDocument.processing_status === 'EXTRACTED'
+                                                    ? 'Re-extract'
+                                                    : inspectDocument.processing_status === 'FAILED'
+                                                    ? 'Retry Extraction'
+                                                    : 'Extract with AI'}
+                                            </Button>
                                         </div>
                                     </div>
 

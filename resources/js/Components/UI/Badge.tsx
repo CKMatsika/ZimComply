@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'teal';
+export type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'teal' | 'purple' | 'slate';
 
 interface BadgeProps {
     children: React.ReactNode;
@@ -38,11 +38,20 @@ export function Badge({
             container: 'bg-sky-50 text-sky-800 border-sky-200',
             dot: 'bg-sky-600',
         },
+        purple: {
+            container: 'bg-purple-50 text-purple-800 border-purple-200',
+            dot: 'bg-purple-600',
+        },
+        slate: {
+            container: 'bg-slate-100 text-slate-600 border-slate-300',
+            dot: 'bg-slate-400',
+        },
         neutral: {
             container: 'bg-slate-100 text-slate-700 border-slate-200',
             dot: 'bg-slate-500',
         },
     };
+
 
     const sizeStyles = {
         sm: 'text-[11px] px-2 py-0.5 font-medium tracking-tight',

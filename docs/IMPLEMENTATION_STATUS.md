@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
 *Last updated: 2026-11-02*  
-*Status: Phase 0, Phase 1, Milestone 2.1, 2.2, 2.3, 2.4 & 2.5 Completed (91/91 Automated Tests Passing, 465 Assertions)*
+*Status: Phase 0, Phase 1, Milestones 2.1, 2.2, 2.3, 2.4, 2.5 & 2.6 Completed (103/103 Automated Tests Passing, 513 Assertions)*
 
 ---
 
@@ -21,7 +21,8 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 | **Milestone 2.3** | Discovery Questionnaire Service & Persistence | **Completed** | 73/73 automated tests passing (380 assertions), draft save/resume verified |
 | **Milestone 2.4** | Document Storage, AI Extraction Pipeline & Human Verification | **Completed** | 91/91 automated tests passing (465 assertions), private vault & verification verified |
 | **Milestone 2.5** | Registration Workspace UI (React + Inertia) | **Completed** | 5-step wizard, prerequisite roadmap & historical audit trail verified |
-| **Milestone 2.6** | End-to-End Verification & Phase 2 Sign-off | Pending | Ready for end-to-end verification and sign-off |
+| **Milestone 2.6** | Security, Data Integrity & Evidence Lifecycle Remediation | **Completed** | 103/103 automated tests passing (513 assertions), all 5 audit findings remediated |
+
 
 ---
 
@@ -269,30 +270,97 @@ PASS  Tests\Feature\TenantIsolationTest
 ✓ tenant scope prevents cross tenant data access
 ✓ branch creation automatically injects active tenant id
 
-Tests:    91 passed (465 assertions)
-Duration: 7.01s
+PASS  Tests\Feature\Documents\EvidenceLifecycleAndRemediationTest
+✓ concurrent and simultaneous extraction requests handled idempotently
+✓ repeated extraction after completed extraction returns existing unless forced
+✓ extraction failure and retry tracking
+✓ valid evidence retained after reassessment
+✓ expired evidence excluded after reassessment
+✓ same tenant cross organisation extraction and access denied
+✓ rejected evidence remaining after valid evidence is unlinked
+✓ multiple linked documents with mixed validity
+✓ scheduled evidence expiry command processing
+✓ queue worker processing and dispatch
+✓ historical audit events preserved across lifecycle events
+✓ verification never automatically declares statutory compliance
+
+Tests:    103 passed (513 assertions)
+Duration: 9.08s
 ```
 
 ---
 
-## 6. Regulatory Assumptions Requiring Legal Verification
+## 6. Milestone 2.6 Security, Data Integrity and Evidence Lifecycle Remediation
 
-In accordance with Section 4 of the Milestone 2.2 instructions:
+Following the Phase 2 Acceptance Audit, all five High and Medium findings plus the Low finding have been remediated:
+
+### 1. Durable AI Extraction Idempotency (HIGH)
+- **Root Cause:** Repeated extraction triggers spawned redundant AI calls and generated orphan `AiVerificationItem` records.
+- **Remediation:**
+  - Implemented database row locking (`lockForUpdate()`) and cache locking (`Cache::lock("extract_lock_{$doc->id}", 60)`).
+  - Extended `AiOrchestrationService::extractRegistrationDocument` with optional `existingItemId` parameter to update pending proposals in-place without generating orphan items.
+  - Preserved completed/historical human reviewer decisions; approved/verified records are never overwritten silently.
+  - Authorized deliberate re-extraction via explicit `force: true` parameter.
+
+### 2. Evidence Preservation During Reassessment (HIGH)
+- **Root Cause:** `RegistrationRoadmapGenerator::syncObligationInstance` previously hardcoded `$evidenceStatus = 'UNKNOWN'` during reassessments.
+- **Remediation:**
+  - Introduced `App\Domains\RegistrationEngine\Services\ObligationEvidenceStatusEvaluator` as the single authoritative evidence evaluator.
+  - Injected evaluator into `RegistrationRoadmapGenerator::syncObligationInstance` to preserve existing valid evidence.
+  - Eligible documents must match tenant and organisation, be `VERIFIED`, non-expired, non-rejected, and non-superseded.
+  - Guaranteed statutory status is never automatically elevated to `COMPLIANT`.
+
+### 3. Background AI Extraction Queue Worker (MEDIUM)
+- **Root Cause:** Web controllers previously invoked external AI models synchronously, risking HTTP timeouts.
+- **Remediation:**
+  - Updated `DocumentVaultController::extract` and `ComplianceDocumentService::upload` (when `auto_extract: true`) to dispatch `ExtractDocumentJob` through Laravel queues.
+  - Persisted processing states: `QUEUED`, `PROCESSING`, `EXTRACTED`, `FAILED`.
+  - Configured retry limits (`$tries = 3`), backoff (`$backoff = 10`), and timeout (`$timeout = 60`).
+  - Stored sanitized failure reasons in `compliance_documents.last_extraction_error` and tracked `extraction_attempts`.
+  - **Local Queue Worker Command:** `C:\php84\php.exe artisan queue:work --tries=3 --timeout=90`.
+
+### 4. Strict Organisation-Level Authorization (MEDIUM)
+- **Root Cause:** Checks previously permitted same-tenant cross-organisation access if a user belonged to the tenant.
+- **Remediation:**
+  - Enforced strict organisation-level access checks on `upload`, `list`, `preview`, `download`, `extract`, `verify`, `reject`, `link`, and `unlink`.
+  - Revalidated organisation membership inside queued jobs (`ExtractDocumentJob`).
+  - Added test coverage ensuring same-tenant cross-organisation requests receive HTTP 403 Forbidden.
+
+### 5. Document Evidence Lifecycle & Expiry (MEDIUM)
+- **Root Cause:** Document validity lacked lifecycle transitions (`EXPIRED`, `SUPERSEDED`, `REVOKED`) and expiry did not update linked obligations.
+- **Remediation:**
+  - Introduced full verification state machine: `PENDING`, `VERIFIED`, `REJECTED`, `EXPIRED`, `SUPERSEDED`, `REVOKED`.
+  - Created scheduled console command: `compliance:evaluate-evidence-lifecycle {--date=}` registered daily in `routes/console.php`.
+  - Transitions expired documents and idempotently re-evaluates linked obligations to `EXPIRED_EVIDENCE`.
+  - **Local Scheduler Command:** `C:\php84\php.exe artisan schedule:run` or manual run `C:\php84\php.exe artisan compliance:evaluate-evidence-lifecycle`.
+
+### 6. Configurable Malware Scanning Abstraction (LOW)
+- **Remediation:**
+  - Defined `App\Shared\Contracts\MalwareScannerInterface` and `App\Shared\DTOs\MalwareScanResult`.
+  - Implemented `NullMalwareScanner` returning `SKIPPED` (offline vault policy) without claiming unverified scans.
+  - Registered binding in `AppServiceProvider`.
+
+### 7. Frontend Documents Workspace
+- Added 5-card metric strip (`Total Vault Evidence`, `Human Verified`, `Pending Review`, `Action Required`, `Expired Evidence`).
+- Updated badges to support `QUEUED` (purple), `EXPIRED` (rose), and `SUPERSEDED` (slate).
+- Added double-click protection and loading spinners during extraction queueing.
+- Displayed expiry and error alerts with manual retry/re-extract actions.
+
+---
+
+## 7. Regulatory Assumptions Requiring Legal Verification
 
 1. **VAT Compulsory Threshold:**
    - Seeded parameter: `USD 25,000.00` per annum under Value Added Tax Act [Chapter 23:12], Section 23.
-   - *Assumed note:* Historical threshold gazetted in statutory instruments; subject to multi-currency fluctuations (ZiG vs USD) and Finance Act amendments. Requires ongoing gazetted statutory verification.
+   - *Assumed note:* Historical threshold gazetted in statutory instruments; subject to multi-currency fluctuations (ZiG vs USD) and Finance Act amendments.
 2. **NSSA POBS & APWCS Compulsory Employer Threshold:**
    - Seeded parameter: `1 employee` within 30 days of first hire under SI 393/1993 and SI 68/1990.
-   - *Assumed note:* Domestic workers vs commercial employees require specific collective schedule verification.
 3. **ZIMDEF Manpower Training Levy:**
    - Seeded parameter: `1% gross monthly wage bill` on commercial employers with statutory exemptions for diplomatic, religious, and non-commercial educational entities under Chapter 28:02.
-   - *Assumed note:* Verification required for specific threshold limits on micro-enterprises.
 4. **ITF263 Tax Clearance:**
    - Seeded parameter: Requires clean tax record across Income Tax, PAYE, and VAT under Income Tax Act [Chapter 23:06], Section 80.
-   - *Assumed note:* TaRMS automated clearance eligibility criteria and transitional amnesty regulations require legal sign-off.
 5. **PRAZ Annual Supplier Registration:**
    - Seeded parameter: Mandatory calendar-year supplier registration for public procurement tenders under Chapter 22:23.
-   - *Assumed note:* Category fee structures and SME concessions require gazetted SI schedule updates.
 6. **NEC and Local Authority Coverage:**
    - Municipal operating licences (Harare, Bulawayo) and sectoral NEC CBAs (Engineering SI 152/2017, Commercial SI 135/2011) currently lack published parameter rule packs in the seeder; the engine correctly places them on `UNVERIFIED_HOLD` until rule packs are legally audited and approved.
+

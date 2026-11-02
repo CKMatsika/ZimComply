@@ -22,7 +22,8 @@ interface AiOrchestrationServiceInterface
     public function extractRegistrationDocument(
         string $documentText,
         string $documentType,
-        ?string $entityId = null
+        ?string $entityId = null,
+        ?string $existingItemId = null
     ): ExtractedRegistrationData;
 
     /**

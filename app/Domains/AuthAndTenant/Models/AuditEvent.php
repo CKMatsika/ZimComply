@@ -21,6 +21,7 @@ class AuditEvent extends Model
         'auditable_id',
         'old_values',
         'new_values',
+        'payload',
         'ip_address',
         'user_agent',
         'created_at',
@@ -31,6 +32,16 @@ class AuditEvent extends Model
         'new_values' => 'array',
         'created_at' => 'datetime',
     ];
+
+    public function setPayloadAttribute($value): void
+    {
+        $this->attributes['new_values'] = is_array($value) ? json_encode($value) : $value;
+    }
+
+    public function getPayloadAttribute(): ?array
+    {
+        return $this->new_values;
+    }
 
     public function user(): BelongsTo
     {

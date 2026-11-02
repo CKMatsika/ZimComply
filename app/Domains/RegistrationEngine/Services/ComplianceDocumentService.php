@@ -5,16 +5,20 @@ namespace App\Domains\RegistrationEngine\Services;
 use App\Domains\AuthAndTenant\Models\AuditEvent;
 use App\Domains\AuthAndTenant\Models\Membership;
 use App\Domains\AuthAndTenant\Models\Organisation;
+use App\Domains\RegistrationEngine\Jobs\ExtractDocumentJob;
 use App\Domains\RegistrationEngine\Models\ComplianceDocument;
 use App\Domains\RegistrationEngine\Models\ObligationInstance;
 use App\Models\User;
 use App\Shared\Ai\Contracts\AiOrchestrationServiceInterface;
 use App\Shared\Ai\Contracts\AiUsageMonitorInterface;
 use App\Shared\Ai\Services\DataPrivacySanitizer;
+use App\Shared\Contracts\MalwareScannerInterface;
 use App\Shared\Services\TenantContext;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -47,11 +51,15 @@ class ComplianceDocumentService
         protected TenantContext $tenantContext,
         protected ?AiOrchestrationServiceInterface $aiOrchestration = null,
         protected ?AiUsageMonitorInterface $usageMonitor = null,
-        protected ?DataPrivacySanitizer $sanitizer = null
+        protected ?DataPrivacySanitizer $sanitizer = null,
+        protected ?MalwareScannerInterface $malwareScanner = null,
+        protected ?ObligationEvidenceStatusEvaluator $evidenceStatusEvaluator = null
     ) {
         $this->aiOrchestration = $aiOrchestration ?? app(AiOrchestrationServiceInterface::class);
         $this->usageMonitor = $usageMonitor ?? app(AiUsageMonitorInterface::class);
         $this->sanitizer = $sanitizer ?? app(DataPrivacySanitizer::class);
+        $this->malwareScanner = $malwareScanner ?? app(MalwareScannerInterface::class);
+        $this->evidenceStatusEvaluator = $evidenceStatusEvaluator ?? app(ObligationEvidenceStatusEvaluator::class);
     }
 
     /**
@@ -67,6 +75,18 @@ class ComplianceDocumentService
 
         if (empty($tenantId) || $organisation->tenant_id !== $tenantId) {
             throw new AuthorizationException('Cross-tenant document upload strictly prohibited.');
+        }
+
+        // Milestone 2.6: Enforce organisation-level membership check for uploader
+        $uploaderMembership = Membership::withoutGlobalScopes()
+            ->where('tenant_id', $tenantId)
+            ->where('user_id', $uploader->id)
+            ->where('organisation_id', $organisation->id)
+            ->where('status', 'ACTIVE')
+            ->first();
+
+        if (!$uploaderMembership && !in_array($uploader->role ?? '', ['SUPERADMIN', 'ADMIN'], true)) {
+            throw new AuthorizationException('User does not have active membership in this organisation.');
         }
 
         // 1. Validate File Size
@@ -90,24 +110,31 @@ class ComplianceDocumentService
         // 3. Inspect Magic Bytes / File Header
         $this->validateMagicBytes($file, $mimeType);
 
-        // 4. Validate Category
+        // 4. Milestone 2.6: Malware Scanning Abstraction Check
+        $scanResult = $this->malwareScanner->scan($file);
+        if (!$scanResult->isClean) {
+            throw new InvalidArgumentException("Malware detected in uploaded file: {$scanResult->details}");
+        }
+        $malwareScanStatus = $scanResult->status;
+
+        // 5. Validate Category
         $category = $attributes['document_type'] ?? 'OTHER';
         if (!array_key_exists($category, self::SUPPORTED_CATEGORIES)) {
             throw new InvalidArgumentException("Unsupported document category [{$category}].");
         }
 
-        // 5. Calculate SHA-256 Hash
+        // 6. Calculate SHA-256 Hash
         $fileContents = file_get_contents($file->getRealPath());
         if ($fileContents === false) {
             throw new RuntimeException('Unable to read uploaded file contents.');
         }
         $sha256Hash = hash('sha256', $fileContents);
 
-        // 6. Generate Randomized Internal Storage Path (never trust client filename)
+        // 7. Generate Randomized Internal Storage Path (never trust client filename)
         $storageId = Str::uuid()->toString() . '.' . $clientExt;
         $privatePath = "tenants/{$tenantId}/documents/{$storageId}";
 
-        // 7. Store on Private Disk
+        // 8. Store on Private Disk
         $disk = Storage::disk('private');
         $stored = $disk->put($privatePath, $fileContents);
 
@@ -115,7 +142,7 @@ class ComplianceDocumentService
             throw new RuntimeException('Failed to persist document to private storage.');
         }
 
-        // 8. Validate Optional Obligation Instance
+        // 9. Validate Optional Obligation Instance
         $obligationInstanceId = null;
         if (!empty($attributes['obligation_instance_id'])) {
             $obligation = ObligationInstance::where('id', $attributes['obligation_instance_id'])
@@ -129,7 +156,7 @@ class ComplianceDocumentService
             $obligationInstanceId = $obligation->id;
         }
 
-        // 9. Persist Record with safe transaction
+        // 10. Persist Record with safe transaction
         $document = DB::transaction(function () use (
             $tenantId,
             $organisation,
@@ -140,7 +167,8 @@ class ComplianceDocumentService
             $file,
             $mimeType,
             $sha256Hash,
-            $obligationInstanceId
+            $obligationInstanceId,
+            $malwareScanStatus
         ) {
             $doc = ComplianceDocument::create([
                 'tenant_id' => $tenantId,
@@ -155,6 +183,7 @@ class ComplianceDocumentService
                 'file_size_bytes' => $file->getSize(),
                 'sha256_hash' => $sha256Hash,
                 'storage_disk' => 'private',
+                'malware_scan_status' => $malwareScanStatus,
                 'verification_status' => 'PENDING',
                 'processing_status' => 'PENDING',
                 'expiry_date' => !empty($attributes['expiry_date']) ? Carbon::parse($attributes['expiry_date']) : null,
@@ -174,14 +203,16 @@ class ComplianceDocumentService
                     'sha256_hash' => $sha256Hash,
                     'file_size' => $file->getSize(),
                     'obligation_instance_id' => $obligationInstanceId,
+                    'malware_scan_status' => $malwareScanStatus,
                 ],
             ]);
 
             if ($obligationInstanceId) {
                 $ob = ObligationInstance::find($obligationInstanceId);
-                if ($ob && $ob->evidence_status !== 'VERIFIED_BY_ISSUER') {
+                if ($ob) {
+                    $newEvidenceStatus = $this->evidenceStatusEvaluator->evaluate($ob);
                     $ob->update([
-                        'evidence_status' => 'DOCUMENT_SUPPORTED',
+                        'evidence_status' => $newEvidenceStatus,
                     ]);
                 }
             }
@@ -189,13 +220,10 @@ class ComplianceDocumentService
             return $doc;
         });
 
-        // 10. Automatically trigger AI extraction if requested & configured
+        // 11. Milestone 2.6: Asynchronously dispatch background extraction when auto_extract is requested
         if (!empty($attributes['auto_extract']) && $attributes['auto_extract'] === true) {
-            try {
-                $this->processExtraction($document, $uploader);
-            } catch (\Throwable $e) {
-                Log::warning('Automatic document extraction deferred: ' . $e->getMessage());
-            }
+            $document->update(['processing_status' => 'QUEUED']);
+            ExtractDocumentJob::dispatch($document->id, $uploader->id);
         }
 
         return $document;
@@ -247,6 +275,8 @@ class ComplianceDocumentService
         ObligationInstance $obligation,
         User $user
     ): ComplianceDocument {
+        $this->authorizeDocumentAccess($document, $user);
+
         $tenantId = $this->tenantContext->getTenantId();
 
         if ($document->tenant_id !== $tenantId || $obligation->tenant_id !== $tenantId) {
@@ -262,18 +292,9 @@ class ComplianceDocumentService
                 'obligation_instance_id' => $obligation->id,
             ]);
 
-            // Update obligation evidence status (never set status to COMPLIANT)
-            $newEvidenceStatus = match ($document->verification_status) {
-                'VERIFIED' => 'DOCUMENT_SUPPORTED',
-                'REJECTED' => 'REJECTED_EVIDENCE',
-                default => 'DOCUMENT_SUPPORTED',
-            };
-
-            if ($obligation->evidence_status !== 'VERIFIED_BY_ISSUER') {
-                $obligation->update([
-                    'evidence_status' => $newEvidenceStatus,
-                ]);
-            }
+            // Milestone 2.6: Authoritatively evaluate obligation evidence status
+            $newEvidenceStatus = $this->evidenceStatusEvaluator->evaluate($obligation);
+            $obligation->update(['evidence_status' => $newEvidenceStatus]);
 
             AuditEvent::create([
                 'tenant_id' => $tenantId,
@@ -284,6 +305,7 @@ class ComplianceDocumentService
                 'payload' => [
                     'obligation_instance_id' => $obligation->id,
                     'definition_id' => $obligation->definition_id,
+                    'derived_evidence_status' => $newEvidenceStatus,
                 ],
             ]);
         });
@@ -306,17 +328,11 @@ class ComplianceDocumentService
             ]);
 
             if ($oldObligationId) {
-                $obligation = ObligationInstance::find($oldObligationId);
+                $obligation = ObligationInstance::withoutGlobalScopes()->find($oldObligationId);
                 if ($obligation) {
-                    $hasOtherDocs = ComplianceDocument::where('obligation_instance_id', $obligation->id)
-                        ->where('id', '!=', $document->id)
-                        ->exists();
-
-                    if (!$hasOtherDocs && $obligation->evidence_status !== 'VERIFIED_BY_ISSUER') {
-                        $obligation->update([
-                            'evidence_status' => $obligation->declared_registration_number ? 'USER_DECLARED' : 'UNKNOWN',
-                        ]);
-                    }
+                    // Milestone 2.6: Authoritatively derive new evidence status based on remaining eligible documents
+                    $newEvidenceStatus = $this->evidenceStatusEvaluator->evaluate($obligation);
+                    $obligation->update(['evidence_status' => $newEvidenceStatus]);
                 }
             }
 
@@ -336,26 +352,64 @@ class ComplianceDocumentService
     }
 
     /**
-     * Process AI extraction for a stored document.
+     * Process AI extraction for a stored document with durable idempotency and concurrency locking.
      */
-    public function processExtraction(ComplianceDocument $document, ?User $triggeredBy = null): ComplianceDocument
-    {
+    public function processExtraction(
+        ComplianceDocument $document,
+        ?User $triggeredBy = null,
+        bool $force = false
+    ): ComplianceDocument {
+        // Milestone 2.6: Enforce organisation-level access check if triggered by user
+        if ($triggeredBy !== null) {
+            $this->authorizeDocumentAccess($document, $triggeredBy);
+        }
+
+        // Milestone 2.6: Durable Idempotency Check — do not re-run if already extracted unless forced
+        if ($document->processing_status === 'EXTRACTED' && !$force) {
+            return $document;
+        }
+
+        // Additional safeguard: Cache lock to prevent concurrent extraction of the same document
+        $lockKey = "extract_lock_{$document->id}";
+        $cacheLock = Cache::lock($lockKey, 60);
+
+        if (!$cacheLock->get() && !$force) {
+            return $document;
+        }
+
         $tenantId = $document->tenant_id;
         $this->tenantContext->setTenant($document->organisation->tenant);
+        $this->tenantContext->setOrganisation($document->organisation);
 
         // 1. Check AI Provider and Quota
         if (!$this->usageMonitor->hasSufficientQuota($tenantId, 2000)) {
             $document->update([
                 'processing_status' => 'UNAVAILABLE',
             ]);
+            $cacheLock->release();
             throw new RuntimeException("AI extraction unavailable: monthly token quota exhausted for tenant [{$tenantId}].");
         }
 
         // 2. Read Document Contents Safely
         $disk = Storage::disk($document->storage_disk ?: 'private');
         if (!$disk->exists($document->file_path)) {
-            $document->update(['processing_status' => 'FAILED']);
+            $document->update([
+                'processing_status' => 'FAILED',
+                'last_extraction_error' => 'File missing from private storage.',
+            ]);
+            $cacheLock->release();
             throw new RuntimeException('Cannot extract document: file missing from private storage.');
+        }
+
+        // Milestone 2.6: Database row lock for atomic transition
+        $lockedDoc = ComplianceDocument::withoutGlobalScopes()
+            ->where('id', $document->id)
+            ->lockForUpdate()
+            ->first();
+
+        if ($lockedDoc && $lockedDoc->processing_status === 'PROCESSING' && !$force) {
+            $cacheLock->release();
+            return $lockedDoc;
         }
 
         $document->update(['processing_status' => 'PROCESSING']);
@@ -365,10 +419,12 @@ class ComplianceDocumentService
             $extractableText = $this->deriveExtractableText($document, $fileRaw);
 
             // 3. Invoke Governed AI Extractor via Laravel AI SDK
+            // Pass existing item ID so pending proposals are updated in-place without generating orphan records
             $extracted = $this->aiOrchestration->extractRegistrationDocument(
                 documentText: $extractableText,
                 documentType: $document->document_type,
-                entityId: $document->organisation_id
+                entityId: $document->organisation_id,
+                existingItemId: $document->ai_verification_item_id
             );
 
             // 4. Update Document Metadata
@@ -389,6 +445,7 @@ class ComplianceDocumentService
             $document->update([
                 'ai_verification_item_id' => $extracted->verificationItemId,
                 'processing_status' => 'EXTRACTED',
+                'last_extraction_error' => null,
                 'extracted_metadata' => $metadata,
                 'issuing_authority' => $metadata['issuing_authority'] ?? $this->getAuthorityNameForCategory($document->document_type),
                 'issue_date' => $issue,
@@ -404,12 +461,22 @@ class ComplianceDocumentService
                 'payload' => [
                     'verification_item_id' => $extracted->verificationItemId,
                     'confidence_score' => $extracted->confidenceScore,
+                    'is_reextraction' => $force,
                 ],
             ]);
 
+            $cacheLock->release();
+
             return $document->fresh(['aiVerificationItem']);
         } catch (\Throwable $e) {
-            $document->update(['processing_status' => 'FAILED']);
+            $document->update([
+                'processing_status' => 'FAILED',
+                'last_extraction_error' => Str::limit($e->getMessage(), 500),
+                'extraction_attempts' => $document->extraction_attempts + 1,
+            ]);
+
+            $cacheLock->release();
+
             // Log without logging confidential document content
             Log::error('AI document extraction failed', [
                 'document_id' => $document->id,
@@ -417,6 +484,7 @@ class ComplianceDocumentService
                 'error_type' => get_class($e),
                 'error_message' => $e->getMessage(),
             ]);
+
             throw $e;
         }
     }
@@ -467,12 +535,13 @@ class ComplianceDocumentService
                 'issuing_authority' => $authority,
             ]);
 
-            // 3. Update Linked Obligation (Never set COMPLIANT)
+            // 3. Update Linked Obligation using authoritative status evaluator
             if ($document->obligation_instance_id) {
-                $obligation = ObligationInstance::find($document->obligation_instance_id);
-                if ($obligation && $obligation->evidence_status !== 'VERIFIED_BY_ISSUER') {
+                $obligation = ObligationInstance::withoutGlobalScopes()->find($document->obligation_instance_id);
+                if ($obligation) {
+                    $newStatus = $this->evidenceStatusEvaluator->evaluate($obligation);
                     $obligation->update([
-                        'evidence_status' => 'DOCUMENT_SUPPORTED',
+                        'evidence_status' => $newStatus,
                     ]);
                 }
             }
@@ -525,12 +594,13 @@ class ComplianceDocumentService
                 'rejection_reason' => $reason,
             ]);
 
-            // 3. Update Linked Obligation
+            // 3. Update Linked Obligation using authoritative status evaluator
             if ($document->obligation_instance_id) {
-                $obligation = ObligationInstance::find($document->obligation_instance_id);
-                if ($obligation && $obligation->evidence_status !== 'VERIFIED_BY_ISSUER') {
+                $obligation = ObligationInstance::withoutGlobalScopes()->find($document->obligation_instance_id);
+                if ($obligation) {
+                    $newStatus = $this->evidenceStatusEvaluator->evaluate($obligation);
                     $obligation->update([
-                        'evidence_status' => 'REJECTED_EVIDENCE',
+                        'evidence_status' => $newStatus,
                     ]);
                 }
             }
@@ -552,21 +622,35 @@ class ComplianceDocumentService
 
     /**
      * Authorize user access to a specific document.
+     * Enforces both tenant isolation AND active organisation membership.
      */
     public function authorizeDocumentAccess(ComplianceDocument $document, User $user): void
     {
         $tenantId = $this->tenantContext->getTenantId();
 
+        // If TenantContext isn't initialized yet in this request/process, resolve from membership
+        if (empty($tenantId)) {
+            $activeMembership = Membership::withoutGlobalScopes()
+                ->where('user_id', $user->id)
+                ->where('organisation_id', $document->organisation_id)
+                ->where('status', 'ACTIVE')
+                ->first();
+            $tenantId = $activeMembership?->tenant_id;
+        }
+
         if (empty($tenantId) || $document->tenant_id !== $tenantId) {
             throw new AuthorizationException('Cross-tenant document access strictly prohibited.');
         }
 
-        $membership = Membership::where('tenant_id', $tenantId)
+        // Milestone 2.6: Enforce strict organisation-level access check
+        $membership = Membership::withoutGlobalScopes()
+            ->where('tenant_id', $document->tenant_id)
             ->where('user_id', $user->id)
             ->where('organisation_id', $document->organisation_id)
+            ->where('status', 'ACTIVE')
             ->first();
 
-        if (!$membership && !in_array($user->role ?? '', ['SUPERADMIN', 'ADMIN'])) {
+        if (!$membership) {
             throw new AuthorizationException('User does not have access to this organisation.');
         }
     }
@@ -578,9 +662,11 @@ class ComplianceDocumentService
     {
         $this->authorizeDocumentAccess($document, $verifier);
 
-        $membership = Membership::where('tenant_id', $document->tenant_id)
+        $membership = Membership::withoutGlobalScopes()
+            ->where('tenant_id', $document->tenant_id)
             ->where('user_id', $verifier->id)
             ->where('organisation_id', $document->organisation_id)
+            ->where('status', 'ACTIVE')
             ->first();
 
         $authorizedRoles = ['OWNER', 'ADMIN', 'COMPLIANCE_OFFICER', 'AUDITOR'];
@@ -588,6 +674,57 @@ class ComplianceDocumentService
         if (!$membership || !in_array($membership->role, $authorizedRoles, true)) {
             throw new AuthorizationException('Reviewer authorization required. Only Compliance Officers, Admins or Owners may verify documents.');
         }
+    }
+
+    /**
+     * Milestone 2.6: Evaluate statutory compliance document expirations and transition linked obligations.
+     *
+     * @param CarbonInterface|null $asOfDate
+     * @return int Number of documents transitioned to EXPIRED
+     */
+    public function evaluateExpirations(?CarbonInterface $asOfDate = null): int
+    {
+        $evalDate = $asOfDate ?? Carbon::now();
+        $dateString = $evalDate->toDateString();
+
+        $expiredDocs = ComplianceDocument::withoutGlobalScopes()
+            ->where('verification_status', 'VERIFIED')
+            ->whereNotNull('expiry_date')
+            ->where('expiry_date', '<', $dateString)
+            ->get();
+
+        $count = 0;
+        foreach ($expiredDocs as $doc) {
+            DB::transaction(function () use ($doc, &$count, $evalDate) {
+                $doc->update([
+                    'verification_status' => 'EXPIRED',
+                ]);
+
+                if ($doc->obligation_instance_id) {
+                    $obligation = ObligationInstance::withoutGlobalScopes()->find($doc->obligation_instance_id);
+                    if ($obligation) {
+                        $newStatus = $this->evidenceStatusEvaluator->evaluate($obligation, $evalDate);
+                        $obligation->update(['evidence_status' => $newStatus]);
+                    }
+                }
+
+                AuditEvent::create([
+                    'tenant_id' => $doc->tenant_id,
+                    'user_id' => null,
+                    'event_type' => 'DOCUMENT_EXPIRED',
+                    'auditable_type' => ComplianceDocument::class,
+                    'auditable_id' => $doc->id,
+                    'payload' => [
+                        'expiry_date' => $doc->expiry_date?->toDateString(),
+                        'evaluated_at' => $evalDate->toIso8601String(),
+                    ],
+                ]);
+
+                $count++;
+            });
+        }
+
+        return $count;
     }
 
     /**

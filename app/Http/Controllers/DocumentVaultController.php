@@ -90,6 +90,10 @@ class DocumentVaultController extends Controller
                 ->where('organisation_id', $org->id)
                 ->where('verification_status', 'REJECTED')
                 ->count();
+            $stats['expired_count'] = ComplianceDocument::where('tenant_id', $tenant->id)
+                ->where('organisation_id', $org->id)
+                ->where('verification_status', 'EXPIRED')
+                ->count();
 
             $documents = $docsCollection->map(function ($doc) {
                 return [
@@ -106,6 +110,9 @@ class DocumentVaultController extends Controller
                     'uploaded_by' => $doc->uploader?->name ?? 'System',
                     'verification_status' => $doc->verification_status,
                     'processing_status' => $doc->processing_status,
+                    'malware_scan_status' => $doc->malware_scan_status ?? 'SKIPPED',
+                    'last_extraction_error' => $doc->last_extraction_error,
+                    'extraction_attempts' => $doc->extraction_attempts ?? 0,
                     'expiry_date' => $doc->expiry_date?->toDateString(),
                     'issue_date' => $doc->issue_date?->toDateString(),
                     'issuing_authority' => $doc->issuing_authority,
@@ -212,6 +219,8 @@ class DocumentVaultController extends Controller
     {
         $document = ComplianceDocument::where('id', $id)->firstOrFail();
 
+        $this->documentService->authorizeDocumentAccess($document, $request->user());
+
         return $this->documentService->download($document, $request->user(), inline: false);
     }
 
@@ -222,22 +231,42 @@ class DocumentVaultController extends Controller
     {
         $document = ComplianceDocument::where('id', $id)->firstOrFail();
 
+        $this->documentService->authorizeDocumentAccess($document, $request->user());
+
         return $this->documentService->download($document, $request->user(), inline: true);
     }
 
     /**
-     * Trigger AI extraction pipeline on stored document.
+     * Trigger AI extraction pipeline on stored document via background queue.
      */
     public function extract(string $id, Request $request): RedirectResponse
     {
         $document = ComplianceDocument::where('id', $id)->firstOrFail();
 
-        try {
-            $this->documentService->processExtraction($document, $request->user());
-            return back()->with('success', 'Document extracted successfully and sent to Human-in-the-Loop verification queue.');
-        } catch (\Throwable $e) {
-            return back()->withErrors(['extraction' => 'Extraction failed: ' . $e->getMessage()]);
+        $this->documentService->authorizeDocumentAccess($document, $request->user());
+
+        $force = $request->boolean('force');
+
+        // Prevent accidental duplicate queueing
+        if (!$force) {
+            if (in_array($document->processing_status, ['QUEUED', 'PROCESSING'], true)) {
+                return back()->with('info', 'Document extraction is already queued or processing.');
+            }
+            if ($document->processing_status === 'EXTRACTED') {
+                return back()->with('info', 'Document is already extracted. Request re-extraction to re-run AI extraction.');
+            }
         }
+
+        // Persist QUEUED state and clear previous error
+        $document->update([
+            'processing_status' => 'QUEUED',
+            'last_extraction_error' => null,
+        ]);
+
+        // Dispatch background job through queue
+        ExtractDocumentJob::dispatch($document->id, $request->user()->id, $force);
+
+        return back()->with('success', 'Document extraction queued for background processing.');
     }
 
     /**
@@ -246,6 +275,8 @@ class DocumentVaultController extends Controller
     public function verify(string $id, Request $request): RedirectResponse
     {
         $document = ComplianceDocument::where('id', $id)->firstOrFail();
+
+        $this->documentService->authorizeDocumentAccess($document, $request->user());
 
         $confirmedPayload = $request->input('confirmed_payload');
 
@@ -269,6 +300,8 @@ class DocumentVaultController extends Controller
 
         $document = ComplianceDocument::where('id', $id)->firstOrFail();
 
+        $this->documentService->authorizeDocumentAccess($document, $request->user());
+
         $this->documentService->rejectDocument(
             document: $document,
             verifier: $request->user(),
@@ -288,6 +321,9 @@ class DocumentVaultController extends Controller
         ]);
 
         $document = ComplianceDocument::where('id', $id)->firstOrFail();
+
+        $this->documentService->authorizeDocumentAccess($document, $request->user());
+
         $obligation = ObligationInstance::where('id', $request->input('obligation_instance_id'))->firstOrFail();
 
         $this->documentService->linkToObligation($document, $obligation, $request->user());
@@ -301,6 +337,8 @@ class DocumentVaultController extends Controller
     public function unlink(string $id, Request $request): RedirectResponse
     {
         $document = ComplianceDocument::where('id', $id)->firstOrFail();
+
+        $this->documentService->authorizeDocumentAccess($document, $request->user());
 
         $this->documentService->unlinkFromObligation($document, $request->user());
 

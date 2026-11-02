@@ -19,7 +19,8 @@ class RegistrationRoadmapGenerator
 {
     public function __construct(
         protected ApplicabilityEvaluator $evaluator = new ApplicabilityEvaluator(),
-        protected DependencyGraph $dependencyGraph = new DependencyGraph()
+        protected DependencyGraph $dependencyGraph = new DependencyGraph(),
+        protected ObligationEvidenceStatusEvaluator $evidenceStatusEvaluator = new ObligationEvidenceStatusEvaluator()
     ) {
     }
 
@@ -324,15 +325,18 @@ class RegistrationRoadmapGenerator
         }
 
         if ($instance) {
+            // Milestone 2.6: Authoritatively derive evidence status so valid evidence is never erased during reassessment
+            $derivedEvidenceStatus = $this->evidenceStatusEvaluator->evaluate($instance, null, $declared);
+
             $instance->update([
                 'assessment_result_id' => $resultId,
                 'status' => $status,
-                'evidence_status' => $evidenceStatus,
+                'evidence_status' => $derivedEvidenceStatus,
                 'declared_registration_number' => $declared['declared_number'] ?? $instance->declared_registration_number,
                 'declared_registered_at' => $declared['declared_date'] ?? $instance->declared_registered_at,
             ]);
         } else {
-            ObligationInstance::create([
+            $created = ObligationInstance::create([
                 'tenant_id' => $tenantId,
                 'organisation_id' => $organisationId,
                 'definition_id' => $decision->obligationDefinition->id,
@@ -342,6 +346,11 @@ class RegistrationRoadmapGenerator
                 'declared_registration_number' => $declared['declared_number'] ?? null,
                 'declared_registered_at' => $declared['declared_date'] ?? null,
             ]);
+
+            $derived = $this->evidenceStatusEvaluator->evaluate($created, null, $declared);
+            if ($derived !== $evidenceStatus) {
+                $created->update(['evidence_status' => $derived]);
+            }
         }
     }
 

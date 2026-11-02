@@ -91,7 +91,8 @@ class AiOrchestrationService implements AiOrchestrationServiceInterface
     public function extractRegistrationDocument(
         string $documentText,
         string $documentType,
-        ?string $entityId = null
+        ?string $entityId = null,
+        ?string $existingItemId = null
     ): ExtractedRegistrationData {
         $tenantId = $this->requireActiveTenantId();
         $userId = auth()->id();
@@ -132,26 +133,46 @@ class AiOrchestrationService implements AiOrchestrationServiceInterface
 
         $confidenceScore = (float) ($structured['confidence_score'] ?? 0.85);
 
-        // 5. Human-in-the-Loop Safeguard: Register proposal in verification queue
-        $verificationItem = $this->createVerificationItem(
-            featureCode: 'REGISTRATION_DOC_EXTRACT',
-            entityType: "App\Modules\Registration\Models\\{$documentType}",
-            entityId: $entityId,
-            proposedPayload: [
-                'company_name' => $structured['company_name'] ?? null,
-                'registration_number' => $structured['registration_number'] ?? null,
-                'incorporation_date' => $structured['incorporation_date'] ?? null,
-                'directors' => (array) ($structured['directors'] ?? []),
-                'tax_clearance_number' => $structured['tax_clearance_number'] ?? null,
-                'issuing_authority' => $structured['issuing_authority'] ?? null,
-                'document_type' => $structured['document_type'] ?? $documentType,
-                'issue_date' => $structured['issue_date'] ?? ($structured['incorporation_date'] ?? null),
-                'expiry_date' => $structured['expiry_date'] ?? null,
-                'registered_address' => $structured['registered_address'] ?? null,
-                'taxpayer_identifier' => $structured['taxpayer_identifier'] ?? ($structured['tax_clearance_number'] ?? null),
-            ],
-            confidenceScore: $confidenceScore
-        );
+        $proposedPayload = [
+            'company_name' => $structured['company_name'] ?? null,
+            'registration_number' => $structured['registration_number'] ?? null,
+            'incorporation_date' => $structured['incorporation_date'] ?? null,
+            'directors' => (array) ($structured['directors'] ?? []),
+            'tax_clearance_number' => $structured['tax_clearance_number'] ?? null,
+            'issuing_authority' => $structured['issuing_authority'] ?? null,
+            'document_type' => $structured['document_type'] ?? $documentType,
+            'issue_date' => $structured['issue_date'] ?? ($structured['incorporation_date'] ?? null),
+            'expiry_date' => $structured['expiry_date'] ?? null,
+            'registered_address' => $structured['registered_address'] ?? null,
+            'taxpayer_identifier' => $structured['taxpayer_identifier'] ?? ($structured['tax_clearance_number'] ?? null),
+        ];
+
+        // 5. Human-in-the-Loop Safeguard: Register or update proposal in verification queue
+        $verificationItem = null;
+        if ($existingItemId) {
+            $existing = AiVerificationItem::where('id', $existingItemId)
+                ->where('tenant_id', $tenantId)
+                ->first();
+
+            // Durable idempotency: update pending proposal in-place; NEVER overwrite an already VERIFIED or REJECTED item silently
+            if ($existing && $existing->status === 'PENDING') {
+                $existing->update([
+                    'proposed_payload' => $proposedPayload,
+                    'confidence_score' => $confidenceScore,
+                ]);
+                $verificationItem = $existing;
+            }
+        }
+
+        if (!$verificationItem) {
+            $verificationItem = $this->createVerificationItem(
+                featureCode: 'REGISTRATION_DOC_EXTRACT',
+                entityType: "App\Modules\Registration\Models\\{$documentType}",
+                entityId: $entityId,
+                proposedPayload: $proposedPayload,
+                confidenceScore: $confidenceScore
+            );
+        }
 
         return new ExtractedRegistrationData(
             companyName: $structured['company_name'] ?? null,

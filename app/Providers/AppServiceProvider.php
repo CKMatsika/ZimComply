@@ -15,6 +15,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Shared\Ai\Services\DataPrivacySanitizer::class);
         $this->app->singleton(\App\Shared\Ai\Contracts\AiUsageMonitorInterface::class, \App\Shared\Ai\Services\AiUsageMonitor::class);
         $this->app->singleton(\App\Shared\Ai\Contracts\AiOrchestrationServiceInterface::class, \App\Shared\Ai\Services\AiOrchestrationService::class);
+        $this->app->singleton(\App\Shared\Contracts\MalwareScannerInterface::class, \App\Shared\Services\NullMalwareScanner::class);
     }
 
     /**
