@@ -143,6 +143,12 @@ class AiOrchestrationService implements AiOrchestrationServiceInterface
                 'incorporation_date' => $structured['incorporation_date'] ?? null,
                 'directors' => (array) ($structured['directors'] ?? []),
                 'tax_clearance_number' => $structured['tax_clearance_number'] ?? null,
+                'issuing_authority' => $structured['issuing_authority'] ?? null,
+                'document_type' => $structured['document_type'] ?? $documentType,
+                'issue_date' => $structured['issue_date'] ?? ($structured['incorporation_date'] ?? null),
+                'expiry_date' => $structured['expiry_date'] ?? null,
+                'registered_address' => $structured['registered_address'] ?? null,
+                'taxpayer_identifier' => $structured['taxpayer_identifier'] ?? ($structured['tax_clearance_number'] ?? null),
             ],
             confidenceScore: $confidenceScore
         );
@@ -156,7 +162,12 @@ class AiOrchestrationService implements AiOrchestrationServiceInterface
             confidenceScore: $confidenceScore,
             sourceDocumentType: $documentType,
             verificationStatus: 'PENDING',
-            verificationItemId: $verificationItem->id
+            verificationItemId: $verificationItem->id,
+            issuingAuthority: $structured['issuing_authority'] ?? null,
+            issueDate: $structured['issue_date'] ?? ($structured['incorporation_date'] ?? null),
+            expiryDate: $structured['expiry_date'] ?? null,
+            registeredAddress: $structured['registered_address'] ?? null,
+            taxpayerIdentifier: $structured['taxpayer_identifier'] ?? ($structured['tax_clearance_number'] ?? null)
         );
     }
 

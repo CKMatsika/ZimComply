@@ -23,7 +23,15 @@ class ComplianceDocument extends Model
         return [
             'file_size_bytes' => 'integer',
             'verified_at' => 'datetime',
+            'extracted_metadata' => 'array',
+            'expiry_date' => 'date',
+            'issue_date' => 'date',
         ];
+    }
+
+    public function uploader(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'uploaded_by_user_id');
     }
 
     public function organisation(): BelongsTo
@@ -54,5 +62,27 @@ class ComplianceDocument extends Model
     public function isPending(): bool
     {
         return $this->verification_status === 'PENDING';
+    }
+
+    public function isRejected(): bool
+    {
+        return $this->verification_status === 'REJECTED';
+    }
+
+    public function isExtracted(): bool
+    {
+        return $this->processing_status === 'EXTRACTED';
+    }
+
+    public function formattedFileSize(): string
+    {
+        $bytes = $this->file_size_bytes;
+        if ($bytes >= 1048576) {
+            return number_format($bytes / 1048576, 2) . ' MB';
+        }
+        if ($bytes >= 1024) {
+            return number_format($bytes / 1024, 1) . ' KB';
+        }
+        return $bytes . ' B';
     }
 }

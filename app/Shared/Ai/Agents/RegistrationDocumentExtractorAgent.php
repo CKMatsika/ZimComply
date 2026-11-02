@@ -57,6 +57,12 @@ INSTRUCTIONS;
             'directors' => $schema->array()->items($schema->string())->required(),
             'tax_clearance_number' => $schema->string()->required(),
             'confidence_score' => $schema->number()->required(),
+            'issuing_authority' => $schema->string(),
+            'document_type' => $schema->string(),
+            'issue_date' => $schema->string(),
+            'expiry_date' => $schema->string(),
+            'registered_address' => $schema->string(),
+            'taxpayer_identifier' => $schema->string(),
         ];
     }
 }

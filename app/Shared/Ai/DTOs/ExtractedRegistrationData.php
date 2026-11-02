@@ -24,7 +24,12 @@ class ExtractedRegistrationData
         public readonly float $confidenceScore = 0.0,
         public readonly string $sourceDocumentType = 'UNKNOWN',
         public readonly string $verificationStatus = 'PENDING',
-        public readonly ?string $verificationItemId = null
+        public readonly ?string $verificationItemId = null,
+        public readonly ?string $issuingAuthority = null,
+        public readonly ?string $issueDate = null,
+        public readonly ?string $expiryDate = null,
+        public readonly ?string $registeredAddress = null,
+        public readonly ?string $taxpayerIdentifier = null
     ) {}
 
     public function toArray(): array
@@ -39,6 +44,11 @@ class ExtractedRegistrationData
             'source_document_type' => $this->sourceDocumentType,
             'verification_status' => $this->verificationStatus,
             'verification_item_id' => $this->verificationItemId,
+            'issuing_authority' => $this->issuingAuthority,
+            'issue_date' => $this->issueDate,
+            'expiry_date' => $this->expiryDate,
+            'registered_address' => $this->registeredAddress,
+            'taxpayer_identifier' => $this->taxpayerIdentifier,
         ];
     }
 }

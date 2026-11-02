@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
 *Last updated: 2026-11-02*  
-*Status: Phase 0, Phase 1, Milestone 2.1, 2.2, 2.3 & 2.5 Completed (73/73 Automated Tests Passing, 380 Assertions)*
+*Status: Phase 0, Phase 1, Milestone 2.1, 2.2, 2.3, 2.4 & 2.5 Completed (91/91 Automated Tests Passing, 465 Assertions)*
 
 ---
 
@@ -19,9 +19,9 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 | **Milestone 2.1** | Regulatory Catalogue, Rule Governance, Schema & Seeders | **Completed** | 25/25 automated tests passing (129 assertions), PostgreSQL 16 migrations executed |
 | **Milestone 2.2** | Deterministic Rules Engine (Applicability & DAG Graph) | **Completed** | 54/54 automated tests passing (230 assertions), Vite production build passing |
 | **Milestone 2.3** | Discovery Questionnaire Service & Persistence | **Completed** | 73/73 automated tests passing (380 assertions), draft save/resume verified |
-| **Milestone 2.4** | Document Storage & AI Extraction Pipeline | Pending | Ready for implementation |
+| **Milestone 2.4** | Document Storage, AI Extraction Pipeline & Human Verification | **Completed** | 91/91 automated tests passing (465 assertions), private vault & verification verified |
 | **Milestone 2.5** | Registration Workspace UI (React + Inertia) | **Completed** | 5-step wizard, prerequisite roadmap & historical audit trail verified |
-| **Milestone 2.6** | End-to-End Verification & Phase 2 Sign-off | Pending | Blocked by Milestone 2.4 |
+| **Milestone 2.6** | End-to-End Verification & Phase 2 Sign-off | Pending | Ready for end-to-end verification and sign-off |
 
 ---
 
@@ -92,7 +92,54 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 
 ---
 
-## 4. Test Verification Ledger (73/73 Passing, 380 Assertions)
+## 4. Milestone 2.4 Deliverables (Secure Document Vault, AI Extraction & Human Verification)
+
+1. **Storage Infrastructure & Security Safeguards:**
+   - Dedicated private filesystem disk (`config/filesystems.php`) pointing to `storage_path('app/private')`. Sensitive documents are strictly excluded from the public disk and are never exposed via public URLs.
+   - Randomized internal storage identifiers: `tenants/{tenant_id}/documents/{uuid}.{ext}`.
+   - Strict content validation: Magic bytes inspection via `finfo_file`, matching declared extensions (`pdf`, `jpg`, `jpeg`, `png`), and size limit checks (<= 10MB).
+   - SHA-256 cryptographic hashing calculated from uploaded byte stream to guarantee evidence immutability.
+   - Safe streaming preview and download endpoints with tenant-scoped ownership validation, preventing path traversal and cross-tenant leakage.
+
+2. **Database Schema Enhancements:**
+   - Additive migration `2026_11_02_100001_add_metadata_columns_to_compliance_documents_table.php` added:
+     - `uploaded_by_user_id` (foreign key to `users`)
+     - `processing_status` (`PENDING`, `PROCESSING`, `EXTRACTED`, `FAILED`, `UNAVAILABLE`)
+     - `extracted_metadata` (jsonb/json for flexible structured output storage)
+     - `expiry_date` & `issue_date` (nullable dates)
+     - `issuing_authority` (string)
+     - Compound index `comp_docs_tenant_proc_idx` (`tenant_id`, `processing_status`)
+
+3. **AI Extraction Pipeline & Governance:**
+   - Integrated with existing `RegistrationDocumentExtractorAgent` using official Laravel AI SDK (`laravel/ai` v1.3.0).
+   - Data privacy sanitization (`DataPrivacySanitizer`) applied to document payloads before sending to AI providers.
+   - Extracted fields: Registered company name, registration/reference number, issuing authority, document type, issue date, expiry date, registered address, taxpayer identifier, and director list.
+   - Provenance retained in `ai_verification_items.metadata` with extraction timestamp and agent identifier.
+   - Tenant-scoped usage metering and rate limiting enforced via `AiUsageLedger`.
+   - Asynchronous execution via `ExtractDocumentJob` queue worker with automatic retry handling and tenant context restoration.
+
+4. **Human Verification Workflow (HITL):**
+   - Mandatory human-in-the-loop verification gate via `ai_verification_items`.
+   - Strict reviewer authorization: only users with `tenant_admin` or `compliance_officer` roles can approve or reject evidence (`ComplianceDocumentService::authorizeReviewer`).
+   - Audit trail recorded in `audit_events` on verification, rejection, and obligation linking.
+   - Document rejection requires an explicit, mandatory rejection reason.
+   - Extracted values can be corrected inline by authorised reviewers prior to approval.
+
+5. **Evidence-to-Obligation Linking & Statutory Compliance Safeguard:**
+   - Documents can be linked and unlinked from `ObligationInstance` records.
+   - Crucial Statutory Safeguard (Section 7): Linking verified evidence updates `obligation_instances.evidence_status` to `'DOCUMENT_SUPPORTED'` without automatically marking the obligation `'COMPLIANT'`. Formal compliance remains governed by deterministic rules and official regulatory processes.
+
+6. **Interactive Enterprise Workspace (`resources/js/Pages/Documents/Index.tsx`):**
+   - Category filtering (Certificate of Incorporation, CR6, CR14/CR5, ZIMRA ITF263, NSSA, Municipal Licences, Other).
+   - Search by filename or document title with status filtering pills.
+   - One-click SHA-256 hash copying, inline secure PDF/image preview modal, and authorized download.
+   - Interactive AI extraction inspection drawer with confidence metrics and side-by-side field correction.
+   - Rejection modal with required reason prompt.
+   - Obligation linking modal showing all active tenant obligations and current evidence status.
+
+---
+
+## 5. Test Verification Ledger (91/91 Passing, 465 Assertions)
 
 Executed using `C:\php84\php.exe artisan test`:
 
@@ -122,6 +169,26 @@ PASS  Tests\Feature\AuthenticationTest
 ✓ user can login with valid credentials
 ✓ user cannot login with invalid credentials
 ✓ new sme registration initializes tenant hierarchy
+
+PASS  Tests\Feature\Documents\DocumentVaultAndExtractionTest
+✓ document upload succeeds with sha256 integrity and private storage
+✓ invalid mime type rejected
+✓ spoofed file extension rejected
+✓ oversized file rejected
+✓ authorized user can download and preview document
+✓ cross tenant document download rejected
+✓ cross tenant document preview rejected
+✓ cross tenant extraction rejected
+✓ uploader ownership and metadata persisted
+✓ document categorization works correctly
+✓ ai extraction succeeds with mocked agent and creates verification item
+✓ ai extraction gracefully handles missing fields
+✓ ai extraction fails gracefully on unreadable document
+✓ non reviewer cannot verify document
+✓ authorized reviewer can correct and approve document
+✓ reviewer can reject document with mandatory reason
+✓ evidence links to obligation without granting compliant status
+✓ audit trail created for all document events
 
 PASS  Tests\Feature\ExampleTest
 ✓ public homepage returns successful response
@@ -202,13 +269,13 @@ PASS  Tests\Feature\TenantIsolationTest
 ✓ tenant scope prevents cross tenant data access
 ✓ branch creation automatically injects active tenant id
 
-Tests:    73 passed (380 assertions)
-Duration: 8.88s
+Tests:    91 passed (465 assertions)
+Duration: 7.01s
 ```
 
 ---
 
-## 5. Regulatory Assumptions Requiring Legal Verification
+## 6. Regulatory Assumptions Requiring Legal Verification
 
 In accordance with Section 4 of the Milestone 2.2 instructions:
 

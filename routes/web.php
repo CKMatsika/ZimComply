@@ -32,7 +32,18 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/comply', [DashboardController::class, 'comply'])->name('comply.index');
     Route::get('/renew', [DashboardController::class, 'renew'])->name('renew.index');
     Route::get('/tender', [DashboardController::class, 'tender'])->name('tender.index');
-    Route::get('/documents', [DashboardController::class, 'documents'])->name('documents.index');
+    
+    // Document Vault Workspace & Verification Routes
+    Route::get('/documents', [\App\Http\Controllers\DocumentVaultController::class, 'index'])->name('documents.index');
+    Route::post('/documents/upload', [\App\Http\Controllers\DocumentVaultController::class, 'upload'])->name('documents.upload');
+    Route::get('/documents/{id}/download', [\App\Http\Controllers\DocumentVaultController::class, 'download'])->name('documents.download');
+    Route::get('/documents/{id}/preview', [\App\Http\Controllers\DocumentVaultController::class, 'preview'])->name('documents.preview');
+    Route::post('/documents/{id}/extract', [\App\Http\Controllers\DocumentVaultController::class, 'extract'])->name('documents.extract');
+    Route::post('/documents/{id}/verify', [\App\Http\Controllers\DocumentVaultController::class, 'verify'])->name('documents.verify');
+    Route::post('/documents/{id}/reject', [\App\Http\Controllers\DocumentVaultController::class, 'reject'])->name('documents.reject');
+    Route::post('/documents/{id}/link', [\App\Http\Controllers\DocumentVaultController::class, 'link'])->name('documents.link');
+    Route::delete('/documents/{id}/unlink', [\App\Http\Controllers\DocumentVaultController::class, 'unlink'])->name('documents.unlink');
+
     Route::get('/reports', [DashboardController::class, 'reports'])->name('reports.index');
     Route::get('/settings', [DashboardController::class, 'settings'])->name('settings.index');
 });
