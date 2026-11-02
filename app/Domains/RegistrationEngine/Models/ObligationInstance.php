@@ -3,6 +3,7 @@
 namespace App\Domains\RegistrationEngine\Models;
 
 use App\Domains\AuthAndTenant\Models\Organisation;
+use App\Models\User;
 use App\Shared\Traits\HasTenant;
 use App\Shared\Traits\HasUuid;
 use Illuminate\Database\Eloquent\Model;
@@ -21,6 +22,9 @@ class ObligationInstance extends Model
     {
         return [
             'declared_registered_at' => 'date',
+            'next_due_date' => 'date',
+            'last_reviewed_at' => 'datetime',
+            'lock_version' => 'integer',
         ];
     }
 
@@ -39,14 +43,64 @@ class ObligationInstance extends Model
         return $this->belongsTo(AssessmentResult::class, 'assessment_result_id');
     }
 
+    public function assignedTo(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_to_user_id');
+    }
+
+    public function lastReviewedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'last_reviewed_by_user_id');
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(ComplianceDocument::class, 'obligation_instance_id');
     }
 
+    public function activityLogs(): HasMany
+    {
+        return $this->hasMany(ObligationActivityLog::class, 'obligation_instance_id')->orderBy('created_at', 'desc');
+    }
+
     public function isCompliant(): bool
     {
-        return $this->status === 'COMPLIANT';
+        return in_array($this->status, ['COMPLIANT', 'VERIFIED_COMPLETE'], true);
+    }
+
+    public function isVerifiedComplete(): bool
+    {
+        return $this->status === 'VERIFIED_COMPLETE';
+    }
+
+    public function isCompletedInternal(): bool
+    {
+        return $this->status === 'COMPLETED_INTERNAL';
+    }
+
+    public function isUnderReview(): bool
+    {
+        return $this->status === 'UNDER_REVIEW';
+    }
+
+    public function isAwaitingEvidence(): bool
+    {
+        return $this->status === 'AWAITING_EVIDENCE';
+    }
+
+    public function isInProgress(): bool
+    {
+        return $this->status === 'IN_PROGRESS';
+    }
+
+    public function isBlocked(): bool
+    {
+        return $this->status === 'BLOCKED';
+    }
+
+    public function isNotApplicable(): bool
+    {
+        return in_array($this->status, ['NOT_APPLICABLE', 'EXEMPT'], true);
     }
 
     /**
@@ -63,3 +117,4 @@ class ObligationInstance extends Model
         return $this->evidence_status === 'VERIFIED_BY_ISSUER';
     }
 }
+

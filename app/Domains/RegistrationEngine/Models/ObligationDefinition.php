@@ -48,6 +48,11 @@ class ObligationDefinition extends Model
         return $this->hasMany(ObligationInstance::class, 'definition_id');
     }
 
+    public function getNameAttribute(): string
+    {
+        return $this->title ?? '';
+    }
+
     public function isVerified(): bool
     {
         return $this->verification_status === 'VERIFIED_OFFICIAL';

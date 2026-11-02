@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
 *Last updated: 2026-11-02*  
-*Status: Phase 0, Phase 1, Milestones 2.1, 2.2, 2.3, 2.4, 2.5 & 2.6 Completed (103/103 Automated Tests Passing, 513 Assertions)*
+*Status: Phase 0, Phase 1, Phase 2 (Milestones 2.1 - 2.6) & Phase 3 (Milestone 3.1) Completed (118/118 Automated Tests Passing, 653 Assertions)*
 
 ---
 
@@ -22,6 +22,7 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 | **Milestone 2.4** | Document Storage, AI Extraction Pipeline & Human Verification | **Completed** | 91/91 automated tests passing (465 assertions), private vault & verification verified |
 | **Milestone 2.5** | Registration Workspace UI (React + Inertia) | **Completed** | 5-step wizard, prerequisite roadmap & historical audit trail verified |
 | **Milestone 2.6** | Security, Data Integrity & Evidence Lifecycle Remediation | **Completed** | 103/103 automated tests passing (513 assertions), all 5 audit findings remediated |
+| **Milestone 3.1** | Ongoing Compliance Obligation Register & Lifecycle Engine | **Completed** | 118/118 automated tests passing (653 assertions), state machine & E2E browser tests verified |
 
 
 ---
@@ -348,7 +349,81 @@ Following the Phase 2 Acceptance Audit, all five High and Medium findings plus t
 
 ---
 
-## 7. Regulatory Assumptions Requiring Legal Verification
+## 7. Milestone 3.1 Deliverables (Ongoing Compliance Obligation Register & Lifecycle Engine)
+
+1. **Additive Database Migrations & Models:**
+   - Migration `2026_11_02_150001_add_ongoing_lifecycle_to_obligation_instances.php`:
+     - Extended `obligation_instances` with `assigned_to_user_id`, `compliance_frequency`, `next_due_date`, `last_reviewed_at`, `last_reviewed_by_user_id`, `internal_notes`, and `lock_version` (optimistic concurrency versioning).
+     - Created `obligation_activity_logs` table recording all lifecycle transitions, ownership reassignments, schedule changes, and audit notes with tenant and organisation isolation.
+   - Updated `ObligationInstance` model with `assignedTo()`, `lastReviewedBy()`, and `activityLogs()` relationships, date casts, and status helper methods.
+   - Added `ObligationActivityLog` model in `App\Domains\RegistrationEngine\Models`.
+
+2. **Compliance Lifecycle State Machine (`App\Domains\ComplianceEngine\Services\ComplianceLifecycleStateMachine`):**
+   - Controlled state machine with strict statuses:
+     - `NOT_STARTED`
+     - `IN_PROGRESS`
+     - `AWAITING_EVIDENCE`
+     - `UNDER_REVIEW`
+     - `COMPLETED_INTERNAL`
+     - `VERIFIED_COMPLETE`
+     - `BLOCKED`
+     - `NOT_APPLICABLE`
+   - **Dual-Control Preconditions & Safeguards:**
+     - `COMPLETED_INTERNAL`: Records that an internal user or admin finished compiling return lines, computations, or declarations. Internal task completion does NOT confer official statutory compliance.
+     - `VERIFIED_COMPLETE`: Only allowed if:
+       1) The actor is an Organisation Admin or Owner (`isOwnerOrAdmin()`).
+       2) The obligation has valid, independently verified, non-expired supporting evidence from the document vault (`evidence_status === 'DOCUMENT_SUPPORTED'` with a non-expired `VERIFIED` document, or `VERIFIED_BY_ISSUER`).
+       3) Unverified, missing, expired, or rejected evidence rejects `VERIFIED_COMPLETE` with `InvalidLifecycleTransitionException`.
+     - `BLOCKED`: Requires a mandatory justification note detailing the blocking reason.
+     - `NOT_APPLICABLE`: Permitted only if the assessment decision is `EXEMPT` / `NOT_APPLICABLE`, or by an admin with a documented legal justification note.
+
+3. **Compliance Register Service (`App\Domains\ComplianceEngine\Services\ComplianceObligationRegisterService`):**
+   - Multi-dimensional filtering by Regulatory Authority, Category, Lifecycle Status, Responsible Owner, and free-text search.
+   - Real-time summary metrics calculation (`total`, `not_started`, `in_progress`, `awaiting_evidence`, `under_review`, `completed_internal`, `verified_complete`, `blocked`, `not_applicable`, `overdue`).
+   - Tenant-scoped database transactions with pessimistic row locking (`lockForUpdate()`) and optimistic concurrency conflict detection (`lock_version`).
+   - Integrated with `ObligationEvidenceStatusEvaluator` for authoritative derivation of document support.
+   - Audit event logging into both `obligation_activity_logs` and enterprise `audit_events`.
+
+4. **Compliance Controller & Endpoints (`App\Http\Controllers\ComplianceRegisterController`):**
+   - `GET /comply`: Renders Inertia `Comply/Index` workspace with real organization obligations and assignable members.
+   - `GET /compliance/obligations/{id}`: Returns JSON detail payload with linked documents, available transitions, and full audit timeline.
+   - `POST /compliance/obligations/{id}/assign`: Handles assignment/reassignment with membership verification and concurrency protection.
+   - `POST /compliance/obligations/{id}/transition`: Validates and transitions status according to state machine rules.
+   - `POST /compliance/obligations/{id}/schedule`: Updates due dates and compliance frequencies.
+
+5. **Compliance Workspace UI (`resources/js/Pages/Comply/Index.tsx`):**
+   - Enterprise multi-card metrics strip displaying live obligation counts.
+   - Dynamic filter toolbar with instant search, authority filter, classification filter, status filter, and owner filter.
+   - Full obligations register data table with status badges distinguishing internal task completion from verified statutory compliance.
+   - Interactive slide-over detail drawer displaying:
+     - Authority, category, and citation badges.
+     - Dual-control statutory guidance banner.
+     - Owner assignment select form with instruction notes.
+     - Lifecycle transition action buttons with precondition feedback.
+     - Linked evidence section with verification status badges and direct Document Vault links.
+     - Statutory legal basis and rule version provenance.
+     - Chronological activity timeline and version lock indicator.
+   - Fully responsive on Desktop, Tablet, and Mobile viewports.
+
+6. **Automated Test Suite (`tests/Feature/Compliance/ComplianceObligationRegisterTest.php`):**
+   - 15 comprehensive feature tests (140 assertions) verifying:
+     - Register generation from approved rule versions.
+     - Authority, category, status, and owner filtering.
+     - Unverified rule version governance (`UNVERIFIED_HOLD` maintained).
+     - Assignment authorization and cross-organisation assignment rejection.
+     - Cross-tenant and same-tenant cross-organisation isolation.
+     - Valid status transition sequences.
+     - Prevention of unverified statutory completion declarations.
+     - Dual-control non-admin verification restrictions.
+     - Mandatory notes on blocked transitions.
+     - Optimistic locking and concurrent update detection.
+     - Preservation of activity logs and audit trails.
+     - Obligation detail endpoint payload structure.
+   - Full suite passes: **118 tests, 653 assertions** (100% passing).
+
+---
+
+## 8. Regulatory Assumptions Requiring Legal Verification
 
 1. **VAT Compulsory Threshold:**
    - Seeded parameter: `USD 25,000.00` per annum under Value Added Tax Act [Chapter 23:12], Section 23.

@@ -29,7 +29,11 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/registration/questionnaire/submit', [\App\Http\Controllers\RegistrationController::class, 'submit'])->name('register.questionnaire.submit');
     Route::post('/registration/reassess', [\App\Http\Controllers\RegistrationController::class, 'reassess'])->name('register.reassess');
     Route::get('/registration/assessments/{id}', [\App\Http\Controllers\RegistrationController::class, 'showAssessment'])->name('register.assessment.show');
-    Route::get('/comply', [DashboardController::class, 'comply'])->name('comply.index');
+    Route::get('/comply', [\App\Http\Controllers\ComplianceRegisterController::class, 'index'])->name('comply.index');
+    Route::get('/compliance/obligations/{id}', [\App\Http\Controllers\ComplianceRegisterController::class, 'show'])->name('compliance.obligations.show');
+    Route::post('/compliance/obligations/{id}/assign', [\App\Http\Controllers\ComplianceRegisterController::class, 'assign'])->name('compliance.obligations.assign');
+    Route::post('/compliance/obligations/{id}/transition', [\App\Http\Controllers\ComplianceRegisterController::class, 'transition'])->name('compliance.obligations.transition');
+    Route::post('/compliance/obligations/{id}/schedule', [\App\Http\Controllers\ComplianceRegisterController::class, 'updateSchedule'])->name('compliance.obligations.schedule');
     Route::get('/renew', [DashboardController::class, 'renew'])->name('renew.index');
     Route::get('/tender', [DashboardController::class, 'tender'])->name('tender.index');
     
