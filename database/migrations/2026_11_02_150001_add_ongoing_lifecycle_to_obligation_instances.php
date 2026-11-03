@@ -12,7 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('obligation_instances', function (Blueprint $table) {
-            $table->uuid('assigned_to_user_id')->nullable()->after('exemption_reason');
+            if (!Schema::hasColumn('obligation_instances', 'assigned_to_user_id')) {
+                $table->uuid('assigned_to_user_id')->nullable()->after('exemption_reason');
+            }
             $table->foreign('assigned_to_user_id')->references('id')->on('users')->nullOnDelete();
 
             $table->string('compliance_frequency', 32)->nullable()->after('assigned_to_user_id');
