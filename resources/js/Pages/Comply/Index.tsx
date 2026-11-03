@@ -449,6 +449,14 @@ export default function ComplyIndex({
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                             <Button
+                                variant="secondary"
+                                size="sm"
+                                href="/comply/calendar"
+                                icon={<Calendar className="w-4 h-4" />}
+                            >
+                                Statutory Filing Calendar
+                            </Button>
+                            <Button
                                 variant="outline"
                                 size="sm"
                                 href="/documents"

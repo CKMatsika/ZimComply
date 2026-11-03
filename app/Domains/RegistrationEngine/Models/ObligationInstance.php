@@ -63,6 +63,12 @@ class ObligationInstance extends Model
         return $this->hasMany(ObligationActivityLog::class, 'obligation_instance_id')->orderBy('created_at', 'desc');
     }
 
+    public function filingOccurrences(): HasMany
+    {
+        return $this->hasMany(\App\Domains\ComplianceEngine\Models\FilingOccurrence::class, 'obligation_instance_id')
+            ->orderBy('filing_period_start', 'asc');
+    }
+
     public function isCompliant(): bool
     {
         return in_array($this->status, ['COMPLIANT', 'VERIFIED_COMPLETE'], true);

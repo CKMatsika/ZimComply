@@ -5,6 +5,7 @@ import {
     LayoutDashboard,
     Compass,
     ShieldCheck,
+    Calendar,
     RefreshCw,
     Award,
     FolderLock,
@@ -49,7 +50,8 @@ export default function AppLayout({ children, title, subtitle }: AppLayoutProps)
     const navItems = [
         { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, active: currentRoute === '/dashboard' },
         { name: 'Registration', href: '/registration', icon: Compass, active: currentRoute.startsWith('/registration') },
-        { name: 'Compliance', href: '/comply', icon: ShieldCheck, active: currentRoute.startsWith('/comply') },
+        { name: 'Compliance', href: '/comply', icon: ShieldCheck, active: currentRoute === '/comply' },
+        { name: 'Compliance Calendar', href: '/comply/calendar', icon: Calendar, active: currentRoute.startsWith('/comply/calendar') || currentRoute.startsWith('/calendar') },
         { name: 'Renewals', href: '/renew', icon: RefreshCw, active: currentRoute.startsWith('/renew') },
         { name: 'Procurement / Tender', href: '/tender', icon: Award, active: currentRoute.startsWith('/tender') },
         { name: 'Documents', href: '/documents', icon: FolderLock, active: currentRoute.startsWith('/documents') },

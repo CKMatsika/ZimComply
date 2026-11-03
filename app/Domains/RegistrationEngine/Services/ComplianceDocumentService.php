@@ -142,7 +142,7 @@ class ComplianceDocumentService
             throw new RuntimeException('Failed to persist document to private storage.');
         }
 
-        // 9. Validate Optional Obligation Instance
+        // 9. Validate Optional Obligation Instance and Filing Occurrence
         $obligationInstanceId = null;
         if (!empty($attributes['obligation_instance_id'])) {
             $obligation = ObligationInstance::where('id', $attributes['obligation_instance_id'])
@@ -154,6 +154,23 @@ class ComplianceDocumentService
                 throw new AuthorizationException('Target obligation instance does not belong to active organisation.');
             }
             $obligationInstanceId = $obligation->id;
+        }
+
+        $filingOccurrenceId = null;
+        if (!empty($attributes['filing_occurrence_id'])) {
+            $filingOcc = \App\Domains\ComplianceEngine\Models\FilingOccurrence::withoutGlobalScopes()
+                ->where('id', $attributes['filing_occurrence_id'])
+                ->where('tenant_id', $tenantId)
+                ->where('organisation_id', $organisation->id)
+                ->first();
+
+            if (!$filingOcc) {
+                throw new AuthorizationException('Target filing occurrence does not belong to active organisation.');
+            }
+            $filingOccurrenceId = $filingOcc->id;
+            if ($obligationInstanceId === null) {
+                $obligationInstanceId = $filingOcc->obligation_instance_id;
+            }
         }
 
         // 10. Persist Record with safe transaction
@@ -168,6 +185,7 @@ class ComplianceDocumentService
             $mimeType,
             $sha256Hash,
             $obligationInstanceId,
+            $filingOccurrenceId,
             $malwareScanStatus
         ) {
             $doc = ComplianceDocument::create([
@@ -175,6 +193,7 @@ class ComplianceDocumentService
                 'organisation_id' => $organisation->id,
                 'uploaded_by_user_id' => $uploader->id,
                 'obligation_instance_id' => $obligationInstanceId,
+                'filing_occurrence_id' => $filingOccurrenceId,
                 'document_type' => $category,
                 'title' => trim($attributes['title'] ?? $file->getClientOriginalName()),
                 'file_path' => $privatePath,
@@ -203,6 +222,7 @@ class ComplianceDocumentService
                     'sha256_hash' => $sha256Hash,
                     'file_size' => $file->getSize(),
                     'obligation_instance_id' => $obligationInstanceId,
+                    'filing_occurrence_id' => $filingOccurrenceId,
                     'malware_scan_status' => $malwareScanStatus,
                 ],
             ]);
@@ -214,6 +234,13 @@ class ComplianceDocumentService
                     $ob->update([
                         'evidence_status' => $newEvidenceStatus,
                     ]);
+                }
+            }
+
+            if ($filingOccurrenceId) {
+                $occ = \App\Domains\ComplianceEngine\Models\FilingOccurrence::withoutGlobalScopes()->find($filingOccurrenceId);
+                if ($occ && $occ->evidence_status === 'NONE') {
+                    $occ->update(['evidence_status' => 'DOCUMENT_UPLOADED']);
                 }
             }
 
@@ -546,6 +573,14 @@ class ComplianceDocumentService
                 }
             }
 
+            // 4. Update Linked Filing Occurrence evidence status (without automatically declaring official acknowledgement)
+            if ($document->filing_occurrence_id) {
+                $filingOcc = \App\Domains\ComplianceEngine\Models\FilingOccurrence::withoutGlobalScopes()->find($document->filing_occurrence_id);
+                if ($filingOcc && !in_array($filingOcc->evidence_status, ['OFFICIALLY_ACKNOWLEDGED', 'INTERNALLY_SUBMITTED'], true)) {
+                    $filingOcc->update(['evidence_status' => 'HUMAN_REVIEWED']);
+                }
+            }
+
             AuditEvent::create([
                 'tenant_id' => $document->tenant_id,
                 'user_id' => $verifier->id,
@@ -602,6 +637,22 @@ class ComplianceDocumentService
                     $obligation->update([
                         'evidence_status' => $newStatus,
                     ]);
+                }
+            }
+
+            // 4. Update Linked Filing Occurrence evidence status on rejection
+            if ($document->filing_occurrence_id) {
+                $filingOcc = \App\Domains\ComplianceEngine\Models\FilingOccurrence::withoutGlobalScopes()->find($document->filing_occurrence_id);
+                if ($filingOcc) {
+                    $remainingValid = ComplianceDocument::withoutGlobalScopes()
+                        ->where('organisation_id', $filingOcc->organisation_id)
+                        ->where('filing_occurrence_id', $filingOcc->id)
+                        ->where('verification_status', 'VERIFIED')
+                        ->exists();
+
+                    if (!$remainingValid) {
+                        $filingOcc->update(['evidence_status' => 'REJECTED_EVIDENCE']);
+                    }
                 }
             }
 

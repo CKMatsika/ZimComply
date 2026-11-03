@@ -34,6 +34,17 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/compliance/obligations/{id}/assign', [\App\Http\Controllers\ComplianceRegisterController::class, 'assign'])->name('compliance.obligations.assign');
     Route::post('/compliance/obligations/{id}/transition', [\App\Http\Controllers\ComplianceRegisterController::class, 'transition'])->name('compliance.obligations.transition');
     Route::post('/compliance/obligations/{id}/schedule', [\App\Http\Controllers\ComplianceRegisterController::class, 'updateSchedule'])->name('compliance.obligations.schedule');
+
+    // Statutory Filing Calendar & Deadline Engine (Milestone 3.2)
+    Route::get('/comply/calendar', [\App\Http\Controllers\ComplianceCalendarController::class, 'index'])->name('comply.calendar');
+    Route::get('/calendar', [\App\Http\Controllers\ComplianceCalendarController::class, 'index'])->name('calendar.index');
+    Route::post('/compliance/filings/generate', [\App\Http\Controllers\ComplianceCalendarController::class, 'generate'])->name('compliance.filings.generate');
+    Route::get('/compliance/filings/{id}', [\App\Http\Controllers\ComplianceCalendarController::class, 'show'])->name('compliance.filings.show');
+    Route::post('/compliance/filings/{id}/assign', [\App\Http\Controllers\ComplianceCalendarController::class, 'assign'])->name('compliance.filings.assign');
+    Route::post('/compliance/filings/{id}/transition', [\App\Http\Controllers\ComplianceCalendarController::class, 'transition'])->name('compliance.filings.transition');
+    Route::post('/compliance/filings/{id}/evidence/link', [\App\Http\Controllers\ComplianceCalendarController::class, 'linkEvidence'])->name('compliance.filings.evidence.link');
+    Route::delete('/compliance/filings/{id}/evidence/{documentId}/unlink', [\App\Http\Controllers\ComplianceCalendarController::class, 'unlinkEvidence'])->name('compliance.filings.evidence.unlink');
+    Route::post('/compliance/filings/{id}/amend-due-date', [\App\Http\Controllers\ComplianceCalendarController::class, 'amendDueDate'])->name('compliance.filings.amend-due-date');
     Route::get('/renew', [DashboardController::class, 'renew'])->name('renew.index');
     Route::get('/tender', [DashboardController::class, 'tender'])->name('tender.index');
     

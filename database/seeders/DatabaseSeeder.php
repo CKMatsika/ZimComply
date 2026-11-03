@@ -102,6 +102,63 @@ class DatabaseSeeder extends Seeder
             'ip_address' => '127.0.0.1',
         ]);
 
+        // 1b. Seed Secondary SME Member & Initial Assessment + Filing Occurrences for Apex Engineering
+        $smeStaff = User::create([
+            'name' => 'Farai Nyamukondiwa',
+            'email' => 'farai@apex.co.zw',
+            'phone' => '+263 77 345 6789',
+            'password' => Hash::make('Password123!'),
+            'email_verified_at' => now(),
+        ]);
+
+        Membership::create([
+            'tenant_id' => $smeTenant->id,
+            'user_id' => $smeStaff->id,
+            'organisation_id' => $apexOrg->id,
+            'role' => 'COMPLIANCE_OFFICER',
+            'status' => 'ACTIVE',
+        ]);
+
+        $roadmapGen = app(\App\Domains\RegistrationEngine\Services\RegistrationRoadmapGenerator::class);
+        $roadmapGen->generate(
+            tenantId: $smeTenant->id,
+            organisationId: $apexOrg->id,
+            businessProfile: [
+                'entity_type' => 'PRIVATE_LIMITED_COMPANY',
+                'is_already_incorporated' => true,
+                'industry_sector' => 'ENGINEERING',
+                'employee_count' => 14,
+                'pays_wages' => true,
+                'annual_turnover_usd' => 95000.00,
+                'bids_on_government_tenders' => true,
+                'has_physical_premises' => true,
+                'jurisdiction_codes' => ['ZW-HARARE'],
+                'licensed_profession_involved' => true,
+            ],
+            assessmentDate: '2026-10-01',
+            assessedByUserId: $smeUser->id
+        );
+
+        // Configure recurring compliance frequencies on applicable obligations for calendar demonstration
+        $nssaOb = \App\Domains\RegistrationEngine\Models\ObligationInstance::withoutGlobalScopes()
+            ->where('organisation_id', $apexOrg->id)
+            ->whereHas('definition', fn ($q) => $q->where('code', 'NSSA_EMPLOYER_REG'))
+            ->first();
+        if ($nssaOb) {
+            $nssaOb->update(['compliance_frequency' => 'MONTHLY', 'assigned_to_user_id' => $smeUser->id]);
+        }
+
+        $vatOb = \App\Domains\RegistrationEngine\Models\ObligationInstance::withoutGlobalScopes()
+            ->where('organisation_id', $apexOrg->id)
+            ->whereHas('definition', fn ($q) => $q->where('code', 'ZIMRA_VAT_REG'))
+            ->first();
+        if ($vatOb) {
+            $vatOb->update(['compliance_frequency' => 'MONTHLY', 'assigned_to_user_id' => $smeStaff->id]);
+        }
+
+        $scheduleGen = app(\App\Domains\ComplianceEngine\Services\FilingScheduleGenerator::class);
+        $scheduleGen->generateForOrganisation($apexOrg, '2026-10-01', 12, $smeUser->id);
+
         // 2. Seed Accounting Practice Multi-Client
         $consultantUser = User::create([
             'name' => 'Chipo Chiroro (CA Z)',

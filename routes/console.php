@@ -9,4 +9,6 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('compliance:evaluate-evidence-lifecycle')->daily();
+Schedule::command('compliance:generate-filing-schedules')->daily();
+
 

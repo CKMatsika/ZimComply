@@ -1,7 +1,7 @@
 # ZimComply AI — Implementation Status & Verification Ledger
 
-*Last updated: 2026-11-02*  
-*Status: Phase 0, Phase 1, Phase 2 (Milestones 2.1 - 2.6) & Phase 3 (Milestone 3.1) Completed (118/118 Automated Tests Passing, 653 Assertions)*
+*Last updated: 2026-11-03*  
+*Status: Phase 0, Phase 1, Phase 2 (Milestones 2.1 - 2.6) & Phase 3 (Milestones 3.1 - 3.2) Completed (142/142 Automated Tests Passing, 804 Assertions)*
 
 ---
 
@@ -23,6 +23,7 @@ Following the mandatory **Codex Operating Instructions** (README Section 12 & 13
 | **Milestone 2.5** | Registration Workspace UI (React + Inertia) | **Completed** | 5-step wizard, prerequisite roadmap & historical audit trail verified |
 | **Milestone 2.6** | Security, Data Integrity & Evidence Lifecycle Remediation | **Completed** | 103/103 automated tests passing (513 assertions), all 5 audit findings remediated |
 | **Milestone 3.1** | Ongoing Compliance Obligation Register & Lifecycle Engine | **Completed** | 118/118 automated tests passing (653 assertions), state machine & E2E browser tests verified |
+| **Milestone 3.2** | Statutory Filing Calendar & Deterministic Deadline Engine | **Completed** | 142/142 automated tests passing (804 assertions), deadline engine, recurrence generator & E2E browser tests verified |
 
 
 ---
@@ -423,7 +424,47 @@ Following the Phase 2 Acceptance Audit, all five High and Medium findings plus t
 
 ---
 
-## 8. Regulatory Assumptions Requiring Legal Verification
+## 8. Milestone 3.2 Deliverables (Statutory Filing Calendar & Deterministic Deadline Engine)
+
+1. **Additive Database Migrations & Models:**
+   - Migration `2026_11_03_090001_create_filing_occurrences_tables.php`:
+     - Created `filing_occurrences` table storing tenant ID, organisation ID, parent `obligation_instance_id`, `obligation_definition_id`, `rule_version_id`, `schedule_identity` (`RETURN`, `PAYMENT`), `filing_frequency`, `filing_period_start`, `filing_period_end`, `filing_period_label`, `original_statutory_due_date`, `current_due_date`, `payment_due_date`, `deadline_calculation_basis` (JSON), `timezone` (`Africa/Harare`), `assigned_to_user_id`, `workflow_status`, `official_submission_status`, `submission_reference`, `official_receipt_number`, `internally_approved_at`, `submitted_at`, `acknowledged_at`, `closed_at`, `evidence_status`, `source_citation`, `verification_status`, and `lock_version`.
+     - Enforced composite unique index `filing_occ_org_inst_period_sched_uniq` on `(organisation_id, obligation_instance_id, filing_period_start, filing_period_end, schedule_identity)`.
+     - Created `filing_occurrence_activity_logs` table for immutable occurrence-level audit history.
+     - Added nullable `filing_occurrence_id` foreign key on `compliance_documents` to bind supporting evidence to a specific filing period.
+
+2. **Deterministic Deadline Calculator (`App\Domains\ComplianceEngine\Services\FilingDeadlineCalculator`):**
+   - Supports verified schedule patterns: `MONTHLY`, `QUARTERLY`, `ANNUAL`, `FIXED_DATE`, and `EVENT_DRIVEN`.
+   - Handles calendar month boundary clamping (e.g. `due_day: 31` in 30-day months or February), leap years (`2028-02-29`), year-end transitions (December 2026 due in January 2027), `Africa/Harare` timezone, mid-year rule amendments, and filing vs payment period distinctions.
+   - Weekend and public holiday adjustments (`NEXT_BUSINESS_DAY`, `PREVIOUS_BUSINESS_DAY`) are applied **only** when explicitly authorised in the approved `RuleVersion` schedule parameters (`weekend_adjustment`).
+   - **Rule-Governance Safeguard:** If an obligation lacks an active, `VERIFIED_OFFICIAL` rule version or explicit schedule definition, the occurrence is marked `UNVERIFIED_HOLD` or `DEADLINE_UNVERIFIED` with `current_due_date = null`. Statutory deadlines are never invented from memory.
+
+3. **Recurrence Generator (`App\Domains\ComplianceEngine\Services\FilingScheduleGenerator`):**
+   - Generates filing occurrences across a configurable future horizon (default 12 months).
+   - Enforces tenant and organisation isolation, cache-locked concurrency protection, and transactional persistence.
+   - Preserves historical immutability: completed (`SUBMITTED`, `ACKNOWLEDGED`, `CLOSED`), in-progress, or past filing occurrences are never overwritten when rules change.
+   - Safely updates future `NOT_STARTED` occurrences when a newly approved `RuleVersion` takes effect, while preserving `original_statutory_due_date`.
+   - Automatically closes future `NOT_STARTED` occurrences if the parent obligation becomes `NOT_APPLICABLE` or `EXEMPT`, while preserving completed historical filings.
+   - Queued job `GenerateFilingScheduleJob` and console command `compliance:generate-filing-schedules` registered in `routes/console.php`.
+
+4. **Filing Lifecycle & Dynamic Display Classification (`FilingLifecycleStateMachine` & `FilingDisplayClassifier`):**
+   - Filing-specific internal workflow states: `NOT_STARTED`, `PREPARING`, `READY_FOR_REVIEW`, `INTERNALLY_APPROVED`, `SUBMITTED`, `ACKNOWLEDGED`, `REJECTED`, `CLOSED`.
+   - Separate official submission statuses: `NOT_SUBMITTED`, `DECLARED_SUBMITTED`, `OFFICIALLY_ACKNOWLEDGED`, `OFFICIALLY_REJECTED`, `WAIVED_OR_EXEMPT`.
+   - Entering a user-supplied `submission_reference` transitions to `SUBMITTED` / `DECLARED_SUBMITTED` only — it never automatically grants `OFFICIALLY_ACKNOWLEDGED`.
+   - `ACKNOWLEDGED` requires organisation admin/compliance officer privileges AND a human-`VERIFIED`, non-expired document linked to that specific `filing_occurrence_id`.
+   - Dynamic operational classifications (`UPCOMING`, `DUE_SOON`, `DUE_TODAY`, `OVERDUE`, `COMPLETED`, `DEADLINE_UNVERIFIED`) never classify an unverified due date as `OVERDUE`.
+
+5. **Compliance Calendar Workspace UI (`resources/js/Pages/Comply/Calendar.tsx`):**
+   - Integrated at `/comply/calendar` and `/calendar` with Monthly Calendar Grid, Filing List View, Upcoming Deadlines View, Overdue Filings View, multi-dimensional filters, and clickable Filing Detail Drawer.
+   - Displays source citations, rule version governance, deterministic due-date calculation explanations, owner assignment, internal workflow transitions, period-specific evidence linking, and immutable audit history.
+
+6. **Automated Test Suite (`tests/Feature/Compliance/StatutoryFilingCalendarTest.php`):**
+   - 24 comprehensive feature tests covering all Milestone 3.2 requirements using clearly labelled `SYNTHETIC_FIXTURE` test rules.
+   - Full suite passes: **142 tests, 804 assertions** (100% passing).
+
+---
+
+## 9. Regulatory Assumptions Requiring Legal Verification
 
 1. **VAT Compulsory Threshold:**
    - Seeded parameter: `USD 25,000.00` per annum under Value Added Tax Act [Chapter 23:12], Section 23.

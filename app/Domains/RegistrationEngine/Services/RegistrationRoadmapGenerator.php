@@ -328,10 +328,19 @@ class RegistrationRoadmapGenerator
             // Milestone 2.6: Authoritatively derive evidence status so valid evidence is never erased during reassessment
             $derivedEvidenceStatus = $this->evidenceStatusEvaluator->evaluate($instance, null, $declared);
 
+            // Preserve active ongoing compliance statuses on reassessment unless decision changed to EXEMPT / NOT_APPLICABLE
+            $resolvedStatus = $instance->status;
+            if (in_array($decision->decision, ['EXEMPT', 'NOT_APPLICABLE'], true)) {
+                $resolvedStatus = $decision->decision;
+            } elseif (in_array($instance->status, ['EXEMPT', 'NOT_APPLICABLE'], true)) {
+                $resolvedStatus = $status;
+            }
+
             $instance->update([
                 'assessment_result_id' => $resultId,
-                'status' => $status,
+                'status' => $resolvedStatus,
                 'evidence_status' => $derivedEvidenceStatus,
+                'compliance_frequency' => $instance->compliance_frequency ?? $decision->obligationDefinition->renewal_frequency,
                 'declared_registration_number' => $declared['declared_number'] ?? $instance->declared_registration_number,
                 'declared_registered_at' => $declared['declared_date'] ?? $instance->declared_registered_at,
             ]);
@@ -343,6 +352,7 @@ class RegistrationRoadmapGenerator
                 'assessment_result_id' => $resultId,
                 'status' => $status,
                 'evidence_status' => $evidenceStatus,
+                'compliance_frequency' => $decision->obligationDefinition->renewal_frequency,
                 'declared_registration_number' => $declared['declared_number'] ?? null,
                 'declared_registered_at' => $declared['declared_date'] ?? null,
             ]);

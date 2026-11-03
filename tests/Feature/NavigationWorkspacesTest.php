@@ -68,6 +68,7 @@ class NavigationWorkspacesTest extends TestCase
             '/dashboard',
             '/registration',
             '/comply',
+            '/comply/calendar',
             '/renew',
             '/tender',
             '/documents',

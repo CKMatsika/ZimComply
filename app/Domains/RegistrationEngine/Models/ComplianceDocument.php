@@ -44,6 +44,11 @@ class ComplianceDocument extends Model
         return $this->belongsTo(ObligationInstance::class, 'obligation_instance_id');
     }
 
+    public function filingOccurrence(): BelongsTo
+    {
+        return $this->belongsTo(\App\Domains\ComplianceEngine\Models\FilingOccurrence::class, 'filing_occurrence_id');
+    }
+
     public function aiVerificationItem(): BelongsTo
     {
         return $this->belongsTo(AiVerificationItem::class, 'ai_verification_item_id');
