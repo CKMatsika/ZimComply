@@ -464,7 +464,37 @@ Following the Phase 2 Acceptance Audit, all five High and Medium findings plus t
 
 ---
 
-## 9. Regulatory Assumptions Requiring Legal Verification
+## 9. Milestone 3.3 Deliverables (Licence, Certificate and Registration Renewal Management)
+
+1. **Additive Database Migrations & Models (Safeguard A & C):**
+   - Migration `2026_11_03_130001_create_statutory_instruments_and_renewals_tables.php`:
+     - Created `statutory_instruments` (`StatutoryInstrument`) separating the underlying legal instrument (`LICENCE`, `PERMIT`, `CERTIFICATE`, `REGISTRATION`, `CLEARANCE`) from individual renewal applications.
+     - Tracks `validity_status` (`ACTIVE`, `EXPIRED`, `SUSPENDED`, `CANCELLED`, `SUPERSEDED`, `UNKNOWN`) completely independently from `current_workflow_status` (`NONE`, `RENEWAL_UPCOMING`, `RENEWAL_IN_PROGRESS`, `AWAITING_DOCUMENTS`, `READY_FOR_SUBMISSION`, `DECLARED_SUBMITTED`, `AWAITING_AUTHORITY_DECISION`, `RENEWED`, `REJECTED`, `WITHDRAWN`, `ABANDONED`, `CANCELLED`).
+     - Created `renewal_attempts` (`RenewalAttempt`) with a database-level single-active-attempt guard (`UNIQUE(statutory_instrument_id, active_attempt_guard)`) and row locking to prevent simultaneous duplicate active renewal attempts while preserving unlimited historical completed, rejected, withdrawn, or abandoned attempts.
+     - Created `renewal_evidence_links` (`RenewalEvidenceLink`) with explicit `document_purpose` (`CURRENT_INSTRUMENT`, `PRIOR_INSTRUMENT`, `REPLACEMENT_INSTRUMENT`, `APPLICATION_SUPPORTING_EVIDENCE`, `AUTHORITY_RECEIPT`, `REJECTION_CORRESPONDENCE`, `SUSPENSION_CANCELLATION_NOTICE`), preserving `compliance_documents.filing_occurrence_id` untouched and maintaining supersession metadata (`is_superseded`, `superseded_by_document_id`, `superseded_at`) and SHA-256 hashes.
+     - Created `renewal_activity_logs` (`RenewalActivityLog`) for immutable instrument and renewal audit trails, including versioned metadata corrections (`metadata_version`).
+
+2. **Controlled Renewal Lifecycle State Machine (`RenewalLifecycleStateMachine` — Safeguard B):**
+   - Enforces strict separation between legal validity (`validity_status`) and renewal application progress (`workflow_status`).
+   - Submitting a renewal application (`DECLARED_SUBMITTED` or `AWAITING_AUTHORITY_DECISION`) **never** extends the legal validity of an expired licence (`validity_status` remains `EXPIRED`).
+   - Uploading or linking a replacement certificate (`REPLACEMENT_INSTRUMENT`) **never** automatically marks an instrument `RENEWED`.
+   - Transitioning to `RENEWED` requires an authorised organisation reviewer/admin (`OWNER`, `ADMIN`, `COMPLIANCE_OFFICER`) AND a human-`VERIFIED`, non-expired `REPLACEMENT_INSTRUMENT` document linked to the attempt.
+
+3. **Deterministic Renewal Date Engine & Calendar Integration (`RenewalDeadlineCalculator` & `FilingCalendarService` — Safeguard D):**
+   - Supports `CALENDAR_YEAR`, `ANNIVERSARY_BASED`, `FIXED_DURATION`, and `EVENT_DRIVEN` renewal schedules from approved `VERIFIED_OFFICIAL` `RuleVersion` parameters (`parameters.renewal_schedule`).
+   - Separates verified instrument expiry dates (`expiry_date`) from verified statutory renewal submission deadlines (`statutory_renewal_deadline`). When no approved renewal-window rule exists, displays established `expiry_date` while setting `statutory_renewal_deadline = null` and `deadline_verification_status = 'DEADLINE_UNVERIFIED'`. Never invents unknown expiry dates or renewal deadlines.
+   - Extends `FilingCalendarService` with a source-aware, deterministically deduplicated `calendar_events` and `renewal_events` feed distinguishing `FILING_DUE_DATE`, `PAYMENT_DUE_DATE`, `INSTRUMENT_EXPIRY_DATE`, and `RENEWAL_SUBMISSION_DEADLINE` without suppressing distinct legal deadlines or creating placeholder `FilingOccurrence` rows.
+
+4. **Renewal Workspace UI (`resources/js/Pages/Renew/Index.tsx`) & Calendar Integration (`resources/js/Pages/Comply/Calendar.tsx`):**
+   - Full Renewal Management Workspace at `/renew` with 6 summary metric cards, 7 status tabs (`All Instruments`, `Active`, `Expiring Soon`, `Expired`, `In Progress`, `Awaiting Decision`, `Completed`), multi-dimensional filters, `Register Existing Instrument` modal, and comprehensive `Instrument Detail Drawer` displaying source-governed deadline explanations, owner assignment, renewal workflow transitions, private Document Vault evidence linking/preview, attempts ledger, administrative validity overrides, and immutable audit history.
+
+5. **Automated Test Suite (`tests/Feature/Compliance/StatutoryRenewalManagementTest.php` — Section 10 & Safeguard E):**
+   - 22 comprehensive feature tests (145 assertions) covering all 18 tests in Section 10 and all 12 safeguards in Section E using clearly labelled `SYNTHETIC_FIXTURE` test rules.
+   - Full suite passes: **164 tests, 949 assertions** (100% passing).
+
+---
+
+## 10. Regulatory Assumptions Requiring Legal Verification
 
 1. **VAT Compulsory Threshold:**
    - Seeded parameter: `USD 25,000.00` per annum under Value Added Tax Act [Chapter 23:12], Section 23.

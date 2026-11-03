@@ -45,7 +45,19 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/compliance/filings/{id}/evidence/link', [\App\Http\Controllers\ComplianceCalendarController::class, 'linkEvidence'])->name('compliance.filings.evidence.link');
     Route::delete('/compliance/filings/{id}/evidence/{documentId}/unlink', [\App\Http\Controllers\ComplianceCalendarController::class, 'unlinkEvidence'])->name('compliance.filings.evidence.unlink');
     Route::post('/compliance/filings/{id}/amend-due-date', [\App\Http\Controllers\ComplianceCalendarController::class, 'amendDueDate'])->name('compliance.filings.amend-due-date');
-    Route::get('/renew', [DashboardController::class, 'renew'])->name('renew.index');
+
+    // Licence, Certificate & Registration Renewal Management (Milestone 3.3)
+    Route::get('/renew', [\App\Http\Controllers\RenewalManagementController::class, 'index'])->name('renew.index');
+    Route::post('/renew/instruments', [\App\Http\Controllers\RenewalManagementController::class, 'store'])->name('renew.instruments.store');
+    Route::get('/renew/instruments/{id}', [\App\Http\Controllers\RenewalManagementController::class, 'show'])->name('renew.instruments.show');
+    Route::post('/renew/instruments/{id}/metadata', [\App\Http\Controllers\RenewalManagementController::class, 'updateMetadata'])->name('renew.instruments.metadata');
+    Route::post('/renew/instruments/{id}/assign', [\App\Http\Controllers\RenewalManagementController::class, 'assign'])->name('renew.instruments.assign');
+    Route::post('/renew/instruments/{id}/validity', [\App\Http\Controllers\RenewalManagementController::class, 'changeValidity'])->name('renew.instruments.validity');
+    Route::post('/renew/instruments/{id}/attempts/start', [\App\Http\Controllers\RenewalManagementController::class, 'startAttempt'])->name('renew.attempts.start');
+    Route::post('/renew/attempts/{attemptId}/transition', [\App\Http\Controllers\RenewalManagementController::class, 'transitionAttempt'])->name('renew.attempts.transition');
+    Route::post('/renew/instruments/{id}/evidence/link', [\App\Http\Controllers\RenewalManagementController::class, 'linkEvidence'])->name('renew.evidence.link');
+    Route::delete('/renew/instruments/{id}/evidence/{linkId}/unlink', [\App\Http\Controllers\RenewalManagementController::class, 'unlinkEvidence'])->name('renew.evidence.unlink');
+
     Route::get('/tender', [DashboardController::class, 'tender'])->name('tender.index');
     
     // Document Vault Workspace & Verification Routes

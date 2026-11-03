@@ -159,6 +159,42 @@ class DatabaseSeeder extends Seeder
         $scheduleGen = app(\App\Domains\ComplianceEngine\Services\FilingScheduleGenerator::class);
         $scheduleGen->generateForOrganisation($apexOrg, '2026-10-01', 12, $smeUser->id);
 
+        // Seed initial Statutory Instruments for Renewal Management demonstration
+        if (\Illuminate\Support\Facades\Schema::hasTable('statutory_instruments')) {
+            $renewalService = app(\App\Domains\ComplianceEngine\Services\RenewalManagementService::class);
+            $renewalService->registerInstrument(
+                organisation: $apexOrg,
+                data: [
+                    'title' => 'City of Harare Commercial Operating & Shop Licence',
+                    'instrument_category' => 'LICENCE',
+                    'issuing_authority_name' => 'City of Harare',
+                    'reference_number' => 'COH-LIC-2026-8842',
+                    'premises_or_scope' => 'Harare Heavy Industrial Workshop (Workington)',
+                    'issue_date' => '2026-01-01',
+                    'expiry_date' => '2026-12-31',
+                    'assigned_to_user_id' => $smeUser->id,
+                    'source_citation' => 'Shop Licences Act [Chapter 14:17]',
+                ],
+                actor: $smeUser
+            );
+
+            $renewalService->registerInstrument(
+                organisation: $apexOrg,
+                data: [
+                    'title' => 'ZIMRA Tax Clearance Certificate (ITF263)',
+                    'instrument_category' => 'CLEARANCE',
+                    'issuing_authority_name' => 'Zimbabwe Revenue Authority (ZIMRA)',
+                    'reference_number' => 'ITF263-2026-994120',
+                    'premises_or_scope' => 'Corporate Entity',
+                    'issue_date' => '2026-01-01',
+                    'expiry_date' => '2026-12-31',
+                    'assigned_to_user_id' => $smeStaff->id,
+                    'source_citation' => 'Income Tax Act [Chapter 23:06], Section 80',
+                ],
+                actor: $smeUser
+            );
+        }
+
         // 2. Seed Accounting Practice Multi-Client
         $consultantUser = User::create([
             'name' => 'Chipo Chiroro (CA Z)',

@@ -203,8 +203,25 @@ interface FilingOccurrenceItem {
     lock_version: number;
 }
 
+interface CalendarEventItem {
+    event_id: string;
+    event_type: 'FILING_DUE_DATE' | 'PAYMENT_DUE_DATE' | 'INSTRUMENT_EXPIRY_DATE' | 'RENEWAL_SUBMISSION_DEADLINE';
+    event_type_label: string;
+    date: string;
+    title: string;
+    source_module: string;
+    source_record_id: string;
+    obligation_instance_id?: string | null;
+    authority_code: string;
+    reference_or_period: string;
+    verification_status: string;
+    status: string;
+}
+
 interface CalendarPageProps {
     occurrences: FilingOccurrenceItem[];
+    calendar_events?: CalendarEventItem[];
+    renewal_events?: CalendarEventItem[];
     metrics: {
         total: number;
         upcoming: number;
@@ -236,6 +253,8 @@ interface CalendarPageProps {
 
 export default function ComplianceCalendar({
     occurrences = [],
+    calendar_events = [],
+    renewal_events = [],
     metrics = {
         total: 0,
         upcoming: 0,
@@ -1066,6 +1085,28 @@ export default function ComplianceCalendar({
                                                                 </button>
                                                             );
                                                         })}
+
+                                                        {renewal_events
+                                                            .filter((re) => re.date === cell.dateStr)
+                                                            .map((re) => (
+                                                                <Link
+                                                                    key={re.event_id}
+                                                                    href="/renew"
+                                                                    className={`block w-full text-left p-1.5 rounded-md border text-[11px] transition-colors ${
+                                                                        re.event_type === 'INSTRUMENT_EXPIRY_DATE'
+                                                                            ? 'bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-950'
+                                                                            : 'bg-teal-50 hover:bg-teal-100 border-teal-200 text-teal-950'
+                                                                    }`}
+                                                                >
+                                                                    <div className="font-bold truncate">
+                                                                        {re.event_type === 'INSTRUMENT_EXPIRY_DATE' ? 'Expiry: ' : 'Renewal Due: '}
+                                                                        {re.title}
+                                                                    </div>
+                                                                    <div className="text-[10px] opacity-80 truncate">
+                                                                        {re.event_type_label} • {re.reference_or_period}
+                                                                    </div>
+                                                                </Link>
+                                                            ))}
                                                     </div>
                                                 </>
                                             )}
@@ -1074,6 +1115,57 @@ export default function ComplianceCalendar({
                                 </div>
                             </CardContent>
                         </Card>
+
+                        {/* Integrated Licence & Certificate Renewal Deadlines */}
+                        {renewal_events.length > 0 && (
+                            <Card>
+                                <CardHeader className="border-b border-indigo-100 bg-indigo-50/40">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <RefreshCw className="w-4 h-4 text-indigo-700" />
+                                            <CardTitle className="text-sm font-bold text-indigo-950">
+                                                Licence, Certificate & Registration Renewal Events ({renewal_events.length})
+                                            </CardTitle>
+                                        </div>
+                                        <Link
+                                            href="/renew"
+                                            className="text-xs font-bold text-[#19766F] hover:underline flex items-center gap-1"
+                                        >
+                                            <span>Open Renewal Workspace</span>
+                                            <ExternalLink className="w-3.5 h-3.5" />
+                                        </Link>
+                                    </div>
+                                    <CardDescription className="text-xs text-indigo-800">
+                                        Distinguishes established Instrument Expiry Dates from verified Statutory Renewal Submission Deadlines.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="p-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        {renewal_events.map((re) => (
+                                            <Link
+                                                key={re.event_id}
+                                                href="/renew"
+                                                className="p-3 rounded-xl border border-indigo-200 bg-white hover:border-[#19766F] transition-colors space-y-1"
+                                            >
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <Badge
+                                                        variant={re.event_type === 'INSTRUMENT_EXPIRY_DATE' ? 'warning' : 'teal'}
+                                                        size="sm"
+                                                    >
+                                                        {re.event_type_label}
+                                                    </Badge>
+                                                    <span className="text-xs font-bold text-slate-900">{re.date}</span>
+                                                </div>
+                                                <div className="text-xs font-bold text-slate-900 truncate">{re.title}</div>
+                                                <div className="text-[11px] text-slate-500">
+                                                    {re.authority_code} • Ref: {re.reference_or_period}
+                                                </div>
+                                            </Link>
+                                        ))}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
 
                         {/* Unverified Deadlines Hold Section */}
                         {unverifiedOccurrences.length > 0 && (
@@ -1750,3 +1842,4 @@ export default function ComplianceCalendar({
         </AppLayout>
     );
 }
+

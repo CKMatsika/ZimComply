@@ -775,6 +775,11 @@ class ComplianceDocumentService
             });
         }
 
+        if (\Illuminate\Support\Facades\Schema::hasTable('statutory_instruments')) {
+            app(\App\Domains\ComplianceEngine\Services\RenewalManagementService::class)
+                ->recalculateExpirationsForOrganisation(null, $evalDate);
+        }
+
         return $count;
     }
 

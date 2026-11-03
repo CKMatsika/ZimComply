@@ -113,3 +113,4 @@ class FilingOccurrence extends Model
             || $this->current_due_date === null;
     }
 }
+

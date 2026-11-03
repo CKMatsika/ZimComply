@@ -162,3 +162,4 @@ return new class extends Migration
         Schema::dropIfExists('filing_occurrences');
     }
 };
+

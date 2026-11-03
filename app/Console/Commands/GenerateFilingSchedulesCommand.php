@@ -43,3 +43,4 @@ class GenerateFilingSchedulesCommand extends Command
         return self::SUCCESS;
     }
 }
+

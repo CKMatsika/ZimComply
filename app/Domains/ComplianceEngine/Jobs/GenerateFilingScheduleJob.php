@@ -39,3 +39,4 @@ class GenerateFilingScheduleJob implements ShouldQueue
         );
     }
 }
+

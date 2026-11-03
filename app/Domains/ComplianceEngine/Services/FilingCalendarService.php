@@ -74,11 +74,14 @@ class FilingCalendarService
             $mEnd = $mStart->copy()->endOfMonth();
 
             $query->where(function (Builder $q) use ($mStart, $mEnd) {
-                $q->whereBetween('current_due_date', [$mStart->toDateString(), $mEnd->toDateString()])
-                  ->orWhere(function (Builder $sub) use ($mStart, $mEnd) {
-                      $sub->whereNull('current_due_date')
-                          ->whereBetween('filing_period_end', [$mStart->toDateString(), $mEnd->toDateString()]);
-                  });
+                $q->where(function (Builder $due) use ($mStart, $mEnd) {
+                    $due->whereDate('current_due_date', '>=', $mStart->toDateString())
+                        ->whereDate('current_due_date', '<=', $mEnd->toDateString());
+                })->orWhere(function (Builder $sub) use ($mStart, $mEnd) {
+                    $sub->whereNull('current_due_date')
+                        ->whereDate('filing_period_end', '>=', $mStart->toDateString())
+                        ->whereDate('filing_period_end', '<=', $mEnd->toDateString());
+                });
             });
         }
 
@@ -183,13 +186,205 @@ class FilingCalendarService
                 'role' => $m->role,
             ]);
 
+        $eventFeed = $this->buildSourceAwareCalendarEventFeed(
+            organisation: $organisation,
+            formattedOccurrences: $formatted->values()->all(),
+            filters: $filters,
+            referenceDate: $refDate
+        );
+
         return [
             'occurrences' => $formatted->values()->all(),
+            'calendar_events' => $eventFeed['calendar_events'],
+            'renewal_events' => $eventFeed['renewal_events'],
             'metrics' => $metrics,
             'members' => $members,
             'filters' => $filters,
             'reference_date' => $refDate->toDateString(),
             'timezone' => FilingDeadlineCalculator::TIMEZONE,
+        ];
+    }
+
+    /**
+     * Build a source-aware, deterministically deduplicated calendar event feed combining:
+     * - FILING_DUE_DATE
+     * - PAYMENT_DUE_DATE
+     * - INSTRUMENT_EXPIRY_DATE
+     * - RENEWAL_SUBMISSION_DEADLINE
+     *
+     * Never suppresses legally distinct event types even when they share a date and obligation.
+     * Never creates FilingOccurrence rows as placeholders for renewal events.
+     *
+     * @param Organisation $organisation
+     * @param array<int, array<string, mixed>> $formattedOccurrences
+     * @param array<string, mixed> $filters
+     * @param CarbonInterface|string|null $referenceDate
+     * @return array{calendar_events: array<int, array<string, mixed>>, renewal_events: array<int, array<string, mixed>>}
+     */
+    public function buildSourceAwareCalendarEventFeed(
+        Organisation $organisation,
+        array $formattedOccurrences,
+        array $filters = [],
+        CarbonInterface|string|null $referenceDate = null
+    ): array {
+        $dedupedEvents = [];
+        $renewalEvents = [];
+
+        // 1. Add Filing & Payment Due Dates from FilingOccurrences
+        foreach ($formattedOccurrences as $occ) {
+            $occId = $occ['id'];
+            $dueDate = $occ['due_dates']['current_due_date'] ?? null;
+            $paymentDate = $occ['due_dates']['payment_due_date'] ?? null;
+            $isUnverified = !empty($occ['due_dates']['is_unverified']);
+
+            if ($dueDate !== null && !$isUnverified) {
+                $eventType = ($occ['schedule_identity'] ?? 'RETURN') === 'PAYMENT'
+                    ? 'PAYMENT_DUE_DATE'
+                    : 'FILING_DUE_DATE';
+                $eventKey = strtolower($eventType) . ':' . $occId;
+
+                $dedupedEvents[$eventKey] = [
+                    'event_id' => $eventKey,
+                    'event_type' => $eventType,
+                    'event_type_label' => $eventType === 'PAYMENT_DUE_DATE' ? 'Payment Due Date' : 'Filing Due Date',
+                    'date' => $dueDate,
+                    'title' => $occ['title'],
+                    'source_module' => 'FILING_CALENDAR',
+                    'source_record_id' => $occId,
+                    'obligation_instance_id' => $occ['obligation_instance_id'] ?? null,
+                    'authority_code' => $occ['authority']['code'] ?? 'GOV',
+                    'reference_or_period' => $occ['filing_period']['label'] ?? '',
+                    'verification_status' => $occ['source_governance']['verification_status'] ?? 'VERIFIED_OFFICIAL',
+                    'status' => $occ['workflow_status'],
+                    'display_classification' => $occ['display_classification']['classification'] ?? 'UPCOMING',
+                ];
+            }
+
+            // If a distinct payment_due_date exists on a RETURN occurrence, emit a separate PAYMENT_DUE_DATE event
+            if ($paymentDate !== null && !$isUnverified && ($occ['schedule_identity'] ?? 'RETURN') !== 'PAYMENT') {
+                $payKey = 'payment_due_date:' . $occId;
+                $dedupedEvents[$payKey] = [
+                    'event_id' => $payKey,
+                    'event_type' => 'PAYMENT_DUE_DATE',
+                    'event_type_label' => 'Payment Due Date',
+                    'date' => $paymentDate,
+                    'title' => $occ['title'] . ' (Payment)',
+                    'source_module' => 'FILING_CALENDAR',
+                    'source_record_id' => $occId,
+                    'obligation_instance_id' => $occ['obligation_instance_id'] ?? null,
+                    'authority_code' => $occ['authority']['code'] ?? 'GOV',
+                    'reference_or_period' => $occ['filing_period']['label'] ?? '',
+                    'verification_status' => $occ['source_governance']['verification_status'] ?? 'VERIFIED_OFFICIAL',
+                    'status' => $occ['workflow_status'],
+                    'display_classification' => $occ['display_classification']['classification'] ?? 'UPCOMING',
+                ];
+            }
+        }
+
+        // 2. Add Instrument Expiry Dates and Verified Renewal Submission Deadlines from StatutoryInstruments
+        if (\Illuminate\Support\Facades\Schema::hasTable('statutory_instruments')) {
+            $instQuery = \App\Domains\ComplianceEngine\Models\StatutoryInstrument::withoutGlobalScopes()
+                ->where('tenant_id', $organisation->tenant_id)
+                ->where('organisation_id', $organisation->id)
+                ->whereNotIn('validity_status', ['CANCELLED', 'SUPERSEDED'])
+                ->with(['authority', 'obligationDefinition']);
+
+            if (!empty($filters['authority'])) {
+                $authFilter = $filters['authority'];
+                $instQuery->where(function (Builder $q) use ($authFilter) {
+                    $q->where('regulatory_authority_id', $authFilter)
+                      ->orWhereHas('authority', function (Builder $sub) use ($authFilter) {
+                          $sub->where('code', $authFilter)->orWhere('id', $authFilter);
+                      });
+                });
+            }
+
+            if (!empty($filters['responsible_user'])) {
+                if ($filters['responsible_user'] === 'unassigned') {
+                    $instQuery->whereNull('assigned_to_user_id');
+                } else {
+                    $instQuery->where('assigned_to_user_id', $filters['responsible_user']);
+                }
+            }
+
+            $monthStart = null;
+            $monthEnd = null;
+            if (!empty($filters['month']) && preg_match('/^(\d{4})-(\d{2})$/', (string) $filters['month'], $m)) {
+                $monthStart = Carbon::create((int) $m[1], (int) $m[2], 1, 0, 0, 0, FilingDeadlineCalculator::TIMEZONE)->startOfMonth()->toDateString();
+                $monthEnd = Carbon::create((int) $m[1], (int) $m[2], 1, 0, 0, 0, FilingDeadlineCalculator::TIMEZONE)->endOfMonth()->toDateString();
+            }
+
+            $instruments = $instQuery->get();
+
+            foreach ($instruments as $inst) {
+                $expiryStr = $inst->expiry_date?->toDateString();
+                $renewalDeadlineStr = $inst->statutory_renewal_deadline?->toDateString();
+                $authCode = $inst->authority?->code ?? $inst->issuing_authority_name;
+
+                // 2a. Instrument Expiry Date Event (where established)
+                if ($expiryStr !== null) {
+                    $inMonth = ($monthStart === null || ($expiryStr >= $monthStart && $expiryStr <= $monthEnd));
+                    if ($inMonth) {
+                        $expKey = "instrument_expiry_date:{$inst->id}:{$expiryStr}";
+                        $eventItem = [
+                            'event_id' => $expKey,
+                            'event_type' => 'INSTRUMENT_EXPIRY_DATE',
+                            'event_type_label' => 'Licence / Instrument Expiry',
+                            'date' => $expiryStr,
+                            'title' => $inst->title,
+                            'source_module' => 'RENEWAL_MANAGEMENT',
+                            'source_record_id' => $inst->id,
+                            'obligation_instance_id' => $inst->obligation_instance_id,
+                            'authority_code' => $authCode,
+                            'reference_or_period' => $inst->reference_number ?? $inst->instrument_category,
+                            'verification_status' => 'ESTABLISHED_INSTRUMENT_DATE',
+                            'status' => $inst->validity_status,
+                            'workflow_status' => $inst->current_workflow_status,
+                        ];
+                        $dedupedEvents[$expKey] = $eventItem;
+                        $renewalEvents[$expKey] = $eventItem;
+                    }
+                }
+
+                // 2b. Verified Statutory Renewal Submission Deadline Event (ONLY when VERIFIED_OFFICIAL)
+                if (
+                    $renewalDeadlineStr !== null
+                    && $inst->deadline_verification_status === 'VERIFIED_OFFICIAL'
+                ) {
+                    $inMonth = ($monthStart === null || ($renewalDeadlineStr >= $monthStart && $renewalDeadlineStr <= $monthEnd));
+                    if ($inMonth) {
+                        $renKey = "renewal_submission_deadline:{$inst->id}:{$renewalDeadlineStr}";
+                        $renItem = [
+                            'event_id' => $renKey,
+                            'event_type' => 'RENEWAL_SUBMISSION_DEADLINE',
+                            'event_type_label' => 'Renewal Submission Deadline',
+                            'date' => $renewalDeadlineStr,
+                            'title' => $inst->title . ' (Renewal Deadline)',
+                            'source_module' => 'RENEWAL_MANAGEMENT',
+                            'source_record_id' => $inst->id,
+                            'obligation_instance_id' => $inst->obligation_instance_id,
+                            'authority_code' => $authCode,
+                            'reference_or_period' => $inst->reference_number ?? $inst->instrument_category,
+                            'verification_status' => 'VERIFIED_OFFICIAL',
+                            'status' => $inst->current_workflow_status,
+                            'validity_status' => $inst->validity_status,
+                        ];
+                        $dedupedEvents[$renKey] = $renItem;
+                        $renewalEvents[$renKey] = $renItem;
+                    }
+                }
+            }
+        }
+
+        $calendarEventsList = array_values($dedupedEvents);
+        usort($calendarEventsList, fn (array $a, array $b) => strcmp($a['date'], $b['date']));
+
+        $renewalEventsList = array_values($renewalEvents);
+        usort($renewalEventsList, fn (array $a, array $b) => strcmp($a['date'], $b['date']));
+
+        return [
+            'calendar_events' => $calendarEventsList,
+            'renewal_events' => $renewalEventsList,
         ];
     }
 
@@ -945,3 +1140,4 @@ class FilingCalendarService
         }
     }
 }
+
